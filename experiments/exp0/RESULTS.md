@@ -50,6 +50,35 @@ delta = ppl_q / ppl_fp16 − 1;  excess = delta(dLLM) − delta(AR)
   MORE tolerant of INT4 weight noise than single-pass AR at matched scale,
   data, tokenizer, recipe?).
 
+## Generative anchor (quality guard for the likelihood results)
+
+64 unconditional samples per condition, length 512, nucleus 0.9, seed 1,
+scored offline with the pre-registered gpt2-large oracle (score_samples.py).
+Deviations from the frozen config, forced by the 8 GB card and applied
+identically to both models: length 512 (not 1024), 64 samples x 1 seed
+(not 512 x 3). Corpus unigram entropy stays 9.4–9.6 bits everywhere sampling
+succeeds — no mode collapse, so gen-ppl comparisons are honest.
+
+| precision | AR gen-ppl | AR delta | dLLM gen-ppl | dLLM delta | excess |
+|---|---:|---:|---:|---:|---:|
+| fp16    | 14.64 | — | 33.87 | — | — |
+| int8    | 14.79 | +1.0% | 37.42 | +10.5% | +9.5 pp |
+| int4    | 28.72 | **+96.2%** | 49.25 | **+45.4%** | **−50.8 pp** |
+| ternary | sampler guard trips | — | sampler guard trips | — | — |
+
+- **INT4 anchor agrees with (and amplifies) the likelihood finding**: the AR
+  control's generation quality roughly halves (+96% gen-ppl) while the dLLM
+  degrades +45%. Per the frozen quality-anchor clause, the likelihood result
+  is corroborated, not fidelity-only.
+- **INT8 nuance**: the dLLM's anchor delta (+10.5%) exceeds its likelihood
+  delta (+0.6%); AR is unchanged. Single-seed, 64 samples — noted as a
+  question for the seeded rerun, not a finding.
+- **Ternary**: both models fail bd3lms' sampling-validity guard outright —
+  ternary-PTQ models cannot produce a single valid sample. Consistent with
+  the likelihood blowup; uninformative about diffusion per pre-registration.
+- AR fp16 gen-ppl 14.64 closely matches the BD3-LM paper's published AR
+  value (14.1 at length 1024) — the anchor pipeline reproduces.
+
 ## Caveats (stated in advance in exp0.yaml)
 
 - The dLLM likelihood is an MC-estimated NELBO upper bound; same-seed
