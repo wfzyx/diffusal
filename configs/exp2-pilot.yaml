@@ -1,0 +1,48 @@
+# Experiment 2 PILOT pre-registration: native ternary QAT gap-of-gaps at toy scale
+# (whitepaper §4.3; pipeline-debugging pilot, NOT the main Exp 2 run)
+#
+# STATUS: FROZEN when committed and tagged (prereg-exp2-pilot-*) BEFORE any
+# training run completes. Purpose: debug the QAT pipeline and get a first
+# single-seed read of the gap-of-gaps. Claims requiring seed spread (>=3 seeds)
+# are explicitly out of scope for the pilot.
+
+meta:
+  experiment: exp2-pilot
+  paper: whitepaper/diffusal-whitepaper.pdf
+  registered_by: Victor Panisa <victor.panisa@gmail.com>
+
+design:
+  runs:                      # 2x2, identical everything except the two factors
+    - {model: ar,   precision: fp16}
+    - {model: ar,   precision: ternary}
+    - {model: dllm, precision: fp16}
+    - {model: dllm, precision: ternary}
+  architecture: bd3lms model=tiny (hidden 256, 8 blocks, 8 heads, tied embeddings),
+    length 512, GPT-2 tokenizer; algo=ar vs algo=mdlm (block_size = length)
+  data: wikitext103 train, wrapped blocks of 512
+  budget: 6000 steps x global batch 64 x 512 tokens (~196M tokens), seed 1,
+    lr 3e-4, warmup 250, fp16 mixed precision, EMA 0.9999
+  qat: ternary weights only (BitNet b1.58 absmean, STE), activations fp;
+    excluded from ternarization: embeddings, vocab head (tied), layernorms,
+    biases — same exclusion pattern as Exp 0. Identical wrapper for both models.
+  hardware: 1x RTX 2080 Super (8 GB, sm75), flash-attn SDPA shim (functional
+    rotary — autograd-safe), torch 2.13 / lightning 2.6.5
+
+quantities:
+  metric: best val ppl on wikitext103 (in-training validation loop, identical
+    protocol both models; dLLM value is its NELBO ppl bound)
+  gap: "gap(model) = ppl(model, ternary) / ppl(model, fp16)"
+  ratio_of_gaps: "R = gap(dllm) / gap(ar)"
+
+thresholds:
+  expected_everywhere: both gaps >> 1 (ternary loses badly at 7M params;
+    this discriminates nothing — whitepaper §4.3)
+  comparable:   "0.8 <= R <= 1.25 -> diffusion pays no extra ternary tax (pilot-grade)"
+  dllm_worse:   "R > 1.25 -> refinement dynamics implicated; Exp 2 fragility
+                 ablations (mask/confidence path precision) become priority"
+  dllm_better:  "R < 0.8 -> absorption upside extends to native training (pilot-grade)"
+  non_claims:
+    - single seed: any outcome is a direction for the seeded Exp 2, never a claim
+    - training divergence of exactly one ternary run -> report as pipeline
+      finding, fix (e.g. lr/clip), rerun; do not interpret as gap evidence
+      until both ternary runs train stably at the same recipe

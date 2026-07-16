@@ -6,8 +6,11 @@ so the quantizer sees exactly the weights that would otherwise be evaluated.
 The identical code path serves the dLLM and the AR control.
 
 Usage:
-  run_quant_eval.py <ar|dllm> <fp16|int8|int4|ternary> <dataset> [extra hydra overrides...]
+  run_quant_eval.py <ar|dllm> <fp16|int8|int4|ternary> <dataset|gen> [extra hydra overrides...]
 
+The third argument selects likelihood eval on a dataset, or 'gen' for the
+generative anchor: unconditional sampling (nucleus 0.9, per the bd3lms
+gen_ppl protocol) scored with generative perplexity under gpt2-large.
 Writes the quantization audit (module list + peak VRAM) to stderr; metrics are
 printed by the harness as usual.
 """
@@ -23,6 +26,7 @@ sys.path.insert(0, os.path.join(EXP0, 'shim'))
 
 model, precision, dataset, *extra = sys.argv[1:]
 assert model in ('ar', 'dllm') and precision in ('fp16', 'int8', 'int4', 'ternary')
+gen_mode = dataset == 'gen'
 
 import torch  # noqa: E402
 import quantize  # noqa: E402
@@ -53,6 +57,23 @@ def patched_end(self):
 
 diffusion.Diffusion.on_validation_epoch_end = patched_end
 
+# Generative-anchor hook: restore_model_and_sample copies EMA weights in,
+# then calls _sample; quantizing at first _sample entry therefore hits
+# exactly the weights that generate.
+_orig_sample = diffusion.Diffusion._sample
+_quantized_for_sampling = []
+
+
+def patched_sample(self, *args, **kwargs):
+  if precision != 'fp16' and not _quantized_for_sampling:
+    report = quantize.quantize_module_(self.backbone, precision)
+    print(f'[quant] {report[-1]}', file=sys.stderr)
+    _quantized_for_sampling.append(True)
+  return _orig_sample(self, *args, **kwargs)
+
+
+diffusion.Diffusion._sample = patched_sample
+
 if model == 'ar':
   model_args = ['algo=ar',
                 f'eval.checkpoint_path={EXP0}/checkpoints/ar-clean.ckpt']
@@ -60,11 +81,24 @@ else:
   model_args = ['algo=mdlm', 'algo.backbone=hf_dit',
                 'eval.checkpoint_path=kuleshov-group/mdlm-owt']
 
-sys.argv = ['main.py', 'mode=ppl_eval', 'loader.eval_batch_size=2',
-            'model=small', f'data={dataset}',
+if gen_mode:
+  # inline oracle kept small (gpt2) so sampler + oracle fit in 8 GB;
+  # the official pre-registered oracle (gpt2-large) scores the saved
+  # samples offline via score_samples.py.
+  mode_args = ['mode=sample_eval', 'loader.eval_batch_size=1',
+               'eval.gen_ppl_eval_model_name_or_path=gpt2',
+               'sampling.num_sample_batches=64', 'sampling.nucleus_p=0.9',
+               f'sampling.logdir={EXP0}/results/anchor/samples_{model}_{precision}',
+               'seed=1'] + (['algo.T=1000'] if model == 'dllm' else [])
+else:
+  mode_args = ['mode=ppl_eval', 'loader.eval_batch_size=2',
+               '+data.insert_valid_eos=False']
+
+sys.argv = ['main.py', 'model=small',
+            f'data={"wikitext103" if gen_mode else dataset}',
             f'data.cache_dir={os.path.expanduser("~/.cache/mdlm_data")}',
-            '+data.insert_valid_eos=False', 'model.length=1024',
-            'wandb=null', *model_args, *extra]
+            'model.length=1024', 'wandb=null',
+            *mode_args, *model_args, *extra]
 
 os.environ.setdefault('WANDB_MODE', 'offline')
 os.chdir(BD3LMS)
