@@ -1,0 +1,157 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+
+\setlist{itemsep=2pt, topsep=4pt}
+
+\title{\textbf{Diffusal: Error Dynamics of Ternary Quantization\\in Masked Diffusion Language Models}\\[6pt]
+\large A Research Program Proposal}
+\author{Victor Panisa\\\texttt{victor.panisa@gmail.com}}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Diffusion large language models (dLLMs) refine a token canvas iteratively, applying the same denoiser repeatedly to (partially) its own output. This makes them a distinctive target for extreme weight quantization: any quantization error is fed back through the refinement loop. We propose \emph{Diffusal}, a measurement-then-build program whose end goal is a natively ternary ($\{-1,0,+1\}$, 1.58-bit) masked text diffusion model, obtained by autoregressive-to-diffusion (A2D) conversion of a small open-weight model followed by ternary quantization-aware training (QAT). The central scientific question is whether quantization error \emph{contracts} or \emph{expands} across refinement steps. We hypothesize a crossover: contractive dynamics at high noise levels, where denoising pulls strongly toward the data manifold, and expansive dynamics near convergence, where relative quantization error dominates. Unlike continuous image diffusion, where step-dependent error accumulation is established, masked text diffusion has a mechanism with no continuous analog: \textbf{argmax commitment is itself a quantizer}, absorbing sub-threshold logit perturbations entirely while converting super-threshold perturbations into discrete, often irreversible token flips. We propose a three-experiment program with pre-registered thresholds, a perturbation-based contractivity protocol that separates per-step distortion from feedback amplification, and---because ternary post-training quantization fails on every architecture---a matched autoregressive control at every precision, making the \emph{excess} degradation of the dLLM the only admissible evidence about diffusion.
+\end{abstract}
+
+\section{Introduction}
+
+Masked and discrete diffusion language models such as MDLM~\cite{mdlm} and LLaDA~\cite{llada} generate text by iteratively denoising a token canvas rather than appending tokens left to right. In parallel, BitNet b1.58~\cite{bitnet} argues that ternary-weight LLMs can be competitive with full-precision models when trained natively at that precision. Neither result implies the other's applicability: whether iterative refinement tolerates, absorbs, or amplifies ternary quantization noise is an open question, and it is the question this program is built around.
+
+The engineering motivation is concrete. A diffusion large language model (dLLM) applies its denoiser $T$ times per generation; an autoregressive (AR) model applies its network once per token but never revisits emitted tokens. If refinement dynamics are \emph{contractive}, a quantized dLLM may be unusually robust---each step corrects the previous step's error. If they are \emph{expansive}, quantization error compounds in a way AR generation structurally cannot, and low-bit dLLMs are more fragile than their weight count suggests. The realistic answer, we argue, is a \textbf{crossover}: contraction at high mask fractions and expansion near convergence. The primary deliverable is the location of that crossover, expressed in mask-fraction (noise-level) terms---not step index, which is a sampler hyperparameter that does not transfer across schedules---and reported as a \emph{distribution across samples}, since averaging can manufacture a smooth crossover that no individual trajectory exhibits.
+
+\paragraph{Contributions.} This proposal contributes:
+\begin{enumerate}
+\item a mechanism-level hypothesis specific to \emph{discrete} diffusion---argmax commitment as an error quantizer with an absorption threshold (\S\ref{sec:hypothesis});
+\item a measurement methodology that decomposes free-running divergence into per-step distortion and dynamical (non-)contractivity, avoiding the trajectory-forking confound that invalidates naive FP16-vs-quantized diffs (\S\ref{sec:exp1});
+\item an experimental design in which every quantization claim carries a matched autoregressive control at the same scale, data, tokenizer, and recipe, so that only the \emph{gap-of-gaps} is interpreted (\S\ref{sec:exp2});
+\item pre-registered go/no-go criteria, including explicit kill conditions (\S\ref{sec:falsifiability}).
+\end{enumerate}
+
+\section{Background and Related Work}
+\label{sec:related}
+
+\paragraph{Quantized continuous diffusion.} For image diffusion, the question ``does quantization error accumulate over denoising steps?'' is answered: yes, non-uniformly by timestep, and the standard mitigations are timestep-aware calibration and mixed precision on sensitive steps (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}). This program does not re-derive these results; its contribution is confined to what differs in the discrete, masked-text setting.
+
+\paragraph{Discrete diffusion language models.} MDLM~\cite{mdlm} provides small, well-documented masked-diffusion checkpoints with matched AR and SEDD baselines trained by the same authors on the same data. LLaDA~\cite{llada} and Dream demonstrate the paradigm at 7--8B scale. DLLMQuant~\cite{dllmquant} studies post-training quantization (PTQ) of dLLMs, but at INT4-class precisions and without AR controls.
+
+\paragraph{Remasking.} A caution from code inspection motivates a key design choice: the well-known samplers of LLaDA and Dream are \emph{commit-and-freeze} despite ``remasking'' naming---LLaDA's low-confidence mode assigns $-\infty$ confidence to unmasked positions, so a committed token can never re-enter play. Under commit-and-freeze, the feedback loop under study barely exists: committed tokens are never revisited, and the process approaches any-order autoregression. Genuine remasking exists as an inference-time retrofit: ReMDM~\cite{remdm} re-opens committed tokens on any pretrained masked-diffusion checkpoint without retraining. Our primary sampler is therefore ReMDM; commit-and-freeze is measured as a secondary condition on the same checkpoint---a two-condition design that isolates the feedback loop with weights held fixed. Sampler implementations are validated against the sampler-correctness evaluations of Tang et al.~\cite{dllmsampler}.
+
+\paragraph{Ternary LLMs.} BitNet b1.58~\cite{bitnet} establishes both the promise (parity with FP16 from roughly 3B parameters) and the central methodological constraint: ternary PTQ fails on \emph{every} architecture, so native low-bit training is the path, and ternary-PTQ failure on a dLLM is uninformative unless it \emph{exceeds} the failure of a matched AR model quantized identically.
+
+\section{Central Hypothesis: Argmax Commitment as a Quantizer}
+\label{sec:hypothesis}
+
+The mechanism that distinguishes masked text diffusion from continuous diffusion is that \textbf{token commitment is itself a quantization operation}. A logit perturbation smaller than the gap to the runner-up token vanishes entirely at commit time---a genuine absorption threshold with no analog in continuous diffusion. A perturbation larger than that gap flips a token discretely and, under most samplers, irreversibly. This predicts:
+
+\begin{enumerate}
+\item \textbf{Per-step tolerance.} Text diffusion could be \emph{more} ternary-tolerant than image diffusion per step, because sub-threshold error is absorbed rather than propagated.
+\item \textbf{Per-mistake fragility.} It could be \emph{less} tolerant per mistake, because a flipped commit is irreversible under commit-and-freeze sampling, making error dynamics step-function-like rather than smooth.
+\item \textbf{Sampler dependence.} The contract-or-expand question is gated by the sampler. Under commit-and-freeze it largely collapses to ``does quantization change the order and identity of commits?''; under genuine remasking the full feedback loop exists. The commit/remask policy, not the denoiser alone, is the load-bearing component.
+\end{enumerate}
+
+\section{Experimental Program}
+
+The program is measurement-then-build: Experiments 0--1 establish whether and where ternary error dynamics are dangerous; Experiment 2 is the ternary training line the end-goal model grows out of.
+
+\subsection{Experiment 0: PTQ Degradation with a Matched AR Control}
+\label{sec:exp0}
+
+\textbf{Objective:} establish the PTQ degradation profile of a small dLLM \emph{relative to a matched AR control} at each precision.
+
+\textbf{Platform.} The primary model is MDLM-owt ($\sim$130M non-embedding parameters, GPT-2 tokenizer, OpenWebText)~\cite{mdlmcode}, chosen because (i) it is the checkpoint ReMDM was built against, and (ii) the same release ships an AR baseline trained by the same authors on the same data at the same scale in the same codebase---the matched control for free. A second scale point uses Tiny-A2D 0.5B/0.6B conversions~\cite{dllmframework}, whose AR \emph{parents} provide unusually tight controls. Larger open dLLMs (LLaDA-8B, Dream-7B, and an open-weight block-diffusion mixture-of-experts (MoE) model in the target model family) are measurement-only external-validity checks.
+
+\textbf{Method.} Run FP16 baselines for both dLLM and AR control; apply naive PTQ to both at INT8, INT4, and ternary (precision pinned per result---INT4 findings do not transfer to ternary); apply a mask-aware PTQ variant inspired by DLLMQuant to the dLLM; compare degradation \emph{deltas}: $(\text{dLLM}_{q} - \text{dLLM}_{fp16})$ versus $(\text{AR}_{q} - \text{AR}_{fp16})$.
+
+\textbf{Interpretation.} If the dLLM's degradation materially exceeds the AR control's at matched precision, the refinement-dynamics worry is live. If the two degrade comparably, refinement adds no measurable fragility, and the object of study becomes the argmax-absorption mechanism (``why is iterated denoising this robust?''). Ternary PTQ failing on \emph{both} models is the expected, uninformative outcome; the INT4$\to$ternary trend of the delta is the early signal.
+
+\subsection{Experiment 1: Error-Trajectory Dynamics}
+\label{sec:exp1}
+
+\textbf{Objective:} characterize how quantization error evolves under iterative refinement---the per-step distortion curve as a function of mask fraction, whether the dynamics contracts injected errors, and where absorption turns into amplification.
+
+\textbf{The alignment confound.} The naive protocol---run FP16 and quantized denoisers from the same corrupted canvas and diff intermediate states---is confounded: as soon as the quantized model commits a different token at step $k$, the two trajectories are solving different problems at step $k{+}1$, and measured divergence conflates per-step distortion with trajectory forking. We therefore run three protocols and keep them separate:
+
+\begin{description}
+\item[Protocol A --- teacher-forced.] At every step, the quantized model receives the exact canvas the FP16 model produced, isolating per-step distortion at a fixed state. Two limits are stated up front: the protocol is off-policy (states are drawn from the FP16 trajectory distribution), and \emph{nothing can accumulate}---Protocol A cannot observe amplification by construction. Growth of Protocol A error with decreasing mask fraction is \emph{state-dependent sensitivity}, not feedback amplification; conflating the two invalidates the analysis.
+\item[Protocol B --- free-running.] Both models run independently from the same start. This is the deployment condition, but its divergence mixes distortion with forking and cannot by itself prove expansion.
+\item[Protocol C --- perturbation-injection contractivity.] Amplification is a property of the dynamics, so it is measured on the dynamics directly: inject a controlled perturbation into the FP16 model's \emph{own} state at noise level (mask fraction) $\sigma$ (flip the $k$ least-confident committed tokens, or add calibrated logit noise before commit) and track whether the sampler contracts or grows the perturbation over subsequent steps (token-Hamming distance to the unperturbed run, as a function of steps-since-injection and $\sigma$). This Lyapunov-style measurement is independent of quantization; the perturbation magnitude is then matched to the Protocol A distortion measured at that $\sigma$.
+\end{description}
+
+The decomposition is the result. Contractive dynamics (C) plus bounded per-step distortion (A) $\Rightarrow$ absorption. Expansive dynamics at the $\sigma$ where distortion is large $\Rightarrow$ amplification, with the mechanism localized. If free-running (B) diverges while A stays bounded and C stays contractive, the problem is commit decisions and schedule, and the fix is precision on the remasking/confidence path, not the whole network.
+
+\textbf{Metrics.} All trajectory metrics are functions of mask fraction, reported as per-sample distributions, never only means: committed-token agreement, Hamming-decay curves after injection (the contractivity estimate), and oscillation rate (remasking sampler only). Every divergence metric carries a \emph{quality anchor} (oracle perplexity and task score): generation is multimodal, so a diverged completion can be equally good---\textbf{a divergence finding with no quality drop is a fidelity result, not a failure}, and is labeled as such. Thresholds for ``grows,'' ``bounded,'' and ``contracts'' are pre-registered before runs.
+
+\textbf{Expected findings.} (i) A crossover distribution in mask-fraction terms; if bimodal (early-fork vs.\ smooth-drift samples), the bimodality is the finding. (ii) Early-fork divergence implies a schedule/threshold fix; late smooth drift corroborated by Protocol C expansion implies genuine precision sensitivity near convergence. (iii) Mitigation priced honestly: higher precision below the crossover requires a resident higher-precision copy or on-the-fly dequantization, charged against the memory story---a crossover at 40\% mask fraction with a resident FP16 copy is not a ternary model.
+
+\subsection{Experiment 2: Native Ternary Training and the Gap-of-Gaps}
+\label{sec:exp2}
+
+\textbf{Objective:} train the actual artifact---a natively ternary dLLM via quantization-aware training (QAT)---and determine whether ternary hurts diffusion \emph{more than it hurts autoregression}, the only question small-scale training can answer.
+
+\textbf{The scale confound, stated up front.} BitNet's competitiveness threshold is roughly 3B parameters; at affordable scales ternary QAT underperforms FP16 for reasons unrelated to diffusion. A small ternary dLLM losing to its FP16 twin is the expected outcome under every hypothesis and discriminates nothing. The discriminating quantity is the \textbf{gap-of-gaps}:
+\[
+\underbrace{(\text{ternary dLLM} - \text{FP16 dLLM})}_{\text{diffusion ternary gap}} \quad \text{vs.} \quad \underbrace{(\text{ternary AR} - \text{FP16 AR})}_{\text{AR ternary gap}}
+\]
+at the same scale, tokenizer, data, token budget, and recipe. Comparable gaps mean diffusion adds no ternary fragility and the end-goal model is plausible wherever ternary AR is; a materially worse dLLM gap implicates refinement dynamics.
+
+\textbf{Ablation grid} (each cell a separate QAT run, $\geq 3$ seeds; effects claimed only when between-cell differences exceed a pre-registered multiple of within-cell seed spread): all-ternary; all-ternary except embeddings/output head; all-ternary except mask embedding and remasking/confidence path; all-ternary except self-conditioning path; FP16 control. Per-module ablations are diagnostic only---quantization effects are non-additive, so all-ternary cells are never dropped.
+
+\textbf{End-goal build.} The shipping artifact is an autoregressive-to-diffusion (A2D) conversion of a small open-weight AR model ($\sim$2--3B effective parameters, near BitNet's competitiveness threshold) with ternary QAT distilled from its FP16 parent, which doubles as both distillation teacher and matched AR control. The two distribution shifts are staged: convert to diffusion at FP16 first, verify against the AR parent, then ternarize with the FP16 diffusion model as teacher; the one-stage variant is an ablation, not the plan. The pipeline is debugged on 270M--1B pilots before the main run.
+
+\textbf{Fragility points with defaults.} (i) The mask embedding and remasking/confidence path stay higher precision until ablations prove them safe---under commit-and-freeze this path is nearly the entire quantization question. (ii) Self-conditioning paths are tested separately. (iii) MoE routers stay FP16/INT8; routing errors are non-local.
+
+\section{Systems and Memory Reality}
+\label{sec:systems}
+
+Two honesty constraints bound the deployment story. First, current GPUs have no native ternary matmul path; ternary is expected to be \emph{slower} than a good INT4 baseline until custom kernels prove otherwise, and serving begins with a standalone fixed-canvas inference loop, not an autoregressive-optimized stack like vLLM. Second, weight compression is the wrong lever if activations, embeddings, logits, and runtime buffers dominate: the popular headline ``a 25B ternary dLLM in 6\,GB'' is probably dead on arrival, and any claim about it must rest on a \emph{measured} peak-VRAM breakdown on the actual small model under test---weights (including any mixed-precision tail), embeddings/head, per-step activations, logits, and runtime buffers at the real canvas size, batch, and step count. That measurement is a required output of Experiments 0--1.
+
+The useful deployment question is: at a fixed VRAM budget, does a ternary dLLM beat the best smaller INT4/FP16 autoregressive model on quality, latency, and reliability? At the scales this program can afford, dLLMs lose to AR models regardless of quantization, so the AR frontier is reported as \emph{context, not the kill gate}. If the answer stays negative at scale, the artifact ships as science, not as a serving strategy---an acceptable outcome, stated in advance.
+
+\section{Falsifiability: Pre-Registration and Kill Criteria}
+\label{sec:falsifiability}
+
+All go/no-go thresholds are pre-registered in experiment configurations before runs. The program stops or re-scopes when any of the following holds: (i) Protocol C shows expansion over most of the schedule, Protocol A distortion is large there, \emph{and} the quality anchor drops past the declared threshold; (ii) quantizing the mask/remasking path changes commit decisions enough to miss quality thresholds; (iii) the ternary dLLM's gap to its FP16 twin exceeds the matched ternary AR gap by the pre-registered margin and the \S\ref{sec:exp2} mitigations do not close it; (iv) the crossover sits at high mask fraction, so the required higher-precision tail erases the memory advantage; (v) ternary inference remains slower than INT4/FP16 after reasonable kernel effort. Divergence-only signals with no quality drop never trigger kills, and losing to an \emph{unmatched} off-the-shelf AR model is context, never a kill. Notably, the null result at Experiment 0---dLLM and AR degrading comparably---does not kill the program; it re-scopes the science toward the argmax-absorption mechanism while the build proceeds on the strength of the ternary-AR analogy.
+
+\section{Conclusion}
+
+Diffusal should not be sold as ``ternary makes huge diffusion LLMs fit on tiny GPUs''---the arithmetic does not support that. The sharper thesis is dynamical: \emph{at which noise level does iterative denoising stop absorbing ternary quantization noise and start amplifying it, and is that behavior any worse than autoregression's at the same precision?} The expected answer is a crossover distribution, not a verdict, and the crossover matters because it prices the mitigation: a higher-precision tail that is cheap if the crossover is late and self-defeating if it is early. The mechanism to watch is argmax commitment acting as its own quantizer. If diffusion's ternary gap matches autoregression's, the end-goal model inherits BitNet's scaling story; if it is worse, the negative result is still real---iterative refinement is more precision-sensitive than its weight count suggests. Either way, the finding is trustworthy only if the trajectory comparison is well-posed, contractivity is measured on the dynamics rather than inferred from teacher-forced curves, and every quantization claim carries its matched autoregressive control.
+
+\begin{thebibliography}{99}\small
+
+\bibitem{bitnet} S. Ma et al. The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits. \emph{arXiv:2402.17764}, 2024.
+
+\bibitem{mdlm} S. Sahoo et al. Simple and Effective Masked Diffusion Language Models. \emph{arXiv:2406.07524}, 2024.
+
+\bibitem{llada} S. Nie et al. Large Language Diffusion Models. \emph{arXiv:2502.09992}, 2025.
+
+\bibitem{dllmquant} Y. Xu et al. DLLMQuant: Quantizing Diffusion-based Large Language Models. \emph{arXiv:2508.14090}, 2025.
+
+\bibitem{ptq4dm} Y. Shang et al. Post-training Quantization on Diffusion Models. \emph{arXiv:2211.15736}, 2022.
+
+\bibitem{qdiffusion} X. Li et al. Q-Diffusion: Quantizing Diffusion Models. \emph{arXiv:2302.04304}, 2023.
+
+\bibitem{tdq} J. So et al. Temporal Dynamic Quantization for Diffusion Models. \emph{arXiv:2306.02316}, 2023.
+
+\bibitem{remdm} G. Wang, Y. Schiff, S. Sahoo, V. Kuleshov. Remasking Discrete Diffusion Models with Inference-Time Scaling. \emph{arXiv:2503.00307}, 2025.
+
+\bibitem{mdlmcode} MDLM checkpoints and matched AR/SEDD baselines. \url{https://github.com/kuleshov-group/mdlm}.
+
+\bibitem{dllmframework} dLLM: Simple Diffusion Language Modeling (Tiny-A2D, AR$\to$diffusion conversion recipes). \emph{arXiv:2602.22661}, 2026. \url{https://github.com/ZHZisZZ/dllm}.
+
+\bibitem{dllmsampler} L. Tang et al. Is Your Diffusion Sampler Actually Correct? A Sampler-Centric Evaluation of Discrete Diffusion Language Models. \url{https://github.com/LuhanTang/dllm_sampler}.
+
+\end{thebibliography}
+
+\end{document}
