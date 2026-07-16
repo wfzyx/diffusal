@@ -8,3 +8,6 @@
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+
+# vendored reference repos (pinned by SHA in configs/exp0.yaml)
+third_party/
