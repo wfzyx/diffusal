@@ -22,6 +22,13 @@ design:
   data: wikitext103 train, wrapped blocks of 512
   budget: 6000 steps x global batch 64 x 512 tokens (~196M tokens), seed 1,
     lr 3e-4, warmup 250, fp16 mixed precision, EMA 0.9999
+  # AMENDMENT 2026-07-16, before any training run completed (smoke tests only):
+  # micro-batch 2 with grad accumulation 32 (global batch unchanged at 64) and
+  # eval_batch_size 2 — the 8 GB card shares VRAM with the desktop and the
+  # fp32 vocab-logits autograd graph does not fit at larger micro-batches.
+  # Implementation notes: QAT applied in the lightning setup() hook (wrapping
+  # __init__ breaks save_hyperparameters frame introspection); EMA rebuilt
+  # after parametrization registration (parameters() iteration order changes).
   qat: ternary weights only (BitNet b1.58 absmean, STE), activations fp;
     excluded from ternarization: embeddings, vocab head (tied), layernorms,
     biases — same exclusion pattern as Exp 0. Identical wrapper for both models.

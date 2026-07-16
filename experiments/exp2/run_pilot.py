@@ -25,18 +25,29 @@ assert model in ('ar', 'dllm') and precision in ('fp16', 'ternary')
 import diffusion  # noqa: E402
 import qat  # noqa: E402
 
-_orig_init = diffusion.Diffusion.__init__
+# NOTE: wrapping __init__ breaks lightning's save_hyperparameters() frame
+# introspection; the setup() hook runs once per fit stage after construction,
+# before any forward. EMA (created in __init__) keeps tracking the same latent
+# Parameter objects, so EMA-then-ternarize eval semantics are preserved.
+_orig_setup = diffusion.Diffusion.setup
 
 
-def patched_init(self, *args, **kwargs):
-  _orig_init(self, *args, **kwargs)
-  if precision == 'ternary':
+def patched_setup(self, stage=None):
+  _orig_setup(self, stage)
+  if precision == 'ternary' and not getattr(self, '_qat_applied', False):
+    self._qat_applied = True
     report = qat.ternarize_for_training_(self.backbone)
     for name, shape, status in report:
       print(f'[qat] {name} {shape} {status}', file=sys.stderr)
+    if self.ema is not None:
+      # registering parametrizations changes parameters() iteration order,
+      # which would misalign the EMA shadow list built in __init__; rebuild
+      # it (same as __init__: shadow = current init weights).
+      self.ema = type(self.ema)(
+        self._get_parameters(), decay=self.config.training.ema)
 
 
-diffusion.Diffusion.__init__ = patched_init
+diffusion.Diffusion.setup = patched_setup
 
 run_dir = os.path.join(EXP2, 'runs', f'{model}_{precision}')
 os.makedirs(run_dir, exist_ok=True)
@@ -47,8 +58,8 @@ algo_args = ['algo=ar'] if model == 'ar' else ['algo=mdlm']
 sys.argv = ['main.py', 'mode=train', 'model=tiny', 'model.length=512',
             'data=wikitext103',
             f'data.cache_dir={os.path.expanduser("~/.cache/mdlm_data")}',
-            'loader.global_batch_size=64', 'loader.batch_size=16',
-            'loader.eval_batch_size=8', 'loader.num_workers=4',
+            'loader.global_batch_size=64', 'loader.batch_size=2',
+            'loader.eval_batch_size=2', 'loader.num_workers=4',
             'trainer.max_steps=6000', 'trainer.precision=16-mixed',
             'trainer.val_check_interval=1000',
             'trainer.limit_val_batches=64',
