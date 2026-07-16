@@ -1,0 +1,109 @@
+# Experiment 0 pre-registration: PTQ degradation with a matched AR control
+# (whitepaper §4.1, kill criteria §6)
+#
+# STATUS: FROZEN at tag prereg-exp0-2026-07-16 — FP16 baseline reproduction
+# completed (see baseline_reproduction below) BEFORE this freeze; no quantized
+# evaluation has been run as of this tag.
+# Any amendment after the first quantized run must be a new tagged commit
+# with written justification; results are also reported against the
+# original thresholds.
+
+meta:
+  experiment: exp0
+  paper: whitepaper/diffusal-whitepaper.pdf
+  registered_by: Victor Panisa <victor.panisa@gmail.com>
+
+platform:
+  dllm:
+    checkpoint: kuleshov-group/mdlm-owt          # HF, ~130M non-embedding, GPT-2 tokenizer
+  ar_control:
+    checkpoint: ar.ckpt                          # matched AR baseline from the MDLM release
+    source: https://drive.google.com/drive/folders/16LuuptK7Xfk-vzhQYZBZ0SA-B-BFluau
+  codebase: third_party/bd3lms                   # kuleshov-group/bd3lms @ 1c3e8f43d88dfbcee5ff2aa6932a9e74b31ae1d7
+  # NOTE: the mdlm repo's own eval CANNOT reproduce the paper's Table 3
+  # (authors' statement, github.com/kuleshov-group/mdlm/issues/22): its
+  # dataloader lacks insert_valid_eos. Zero-shot protocol follows
+  # bd3lms scripts/zs_ppl: +data.insert_valid_eos=False for BOTH models.
+  hardware: 1x RTX 2080 Super (8 GB, sm75), fp16 inference
+  deviations:
+    # Turing has no FlashAttention-2 support; MDLM's DiT hard-imports flash_attn.
+    - flash_attn replaced with torch scaled_dot_product_attention + torch rotary,
+      applied identically to dLLM and AR control. FP16 baselines must reproduce
+      published MDLM/AR perplexities within tolerance below BEFORE freezing.
+    - openwebtext-valid dropped (55 GB download infeasible); likelihood eval uses
+      the small zero-shot sets below. Deltas, not absolute ppl, are the object.
+  baseline_reproduction_tolerance: 0.05          # relative ppl error vs published numbers
+  baseline_reproduction:                         # MEASURED 2026-07-16, before freeze
+    # reference: BD3-LM paper Table 5 (arXiv:2503.09573, same protocol);
+    # eval: bd3lms mode=ppl_eval, +data.insert_valid_eos=False,
+    # loader.eval_batch_size=2, model.length=1024, harness default seed.
+    ar:      {wikitext103: 25.61, ptb: 80.75, lambada: 52.99}   # pub: 25.32 / 81.07 / 52.13 — all within 1.6%
+    dllm:    {wikitext103: 30.67, ptb: 82.40, lambada: 49.12}   # pub: 33.22 / 90.96 / 48.29
+    # dLLM note: the diffusion ppl is an MC-estimated upper bound (mask rates
+    # sampled per sequence). On small sets (ptb ~40 blocks) run-to-run scatter
+    # is large and our estimates land BELOW published — acceptable for an
+    # upper bound. AR is exact and is the binding reproduction check.
+    # Within Exp 0 all deltas are computed same-seed/same-protocol, so MC
+    # scatter largely cancels; quantized-vs-fp16 dLLM comparisons must reuse
+    # the identical eval seed and batch size.
+
+evaluation:
+  likelihood:
+    datasets: [wikitext103, ptb, lambada]        # via third_party/mdlm dataloader
+    primary_dataset: wikitext103
+    context_length: 1024
+    metric:
+      ar: exact perplexity
+      dllm: NELBO perplexity bound (MC-estimated; report mean +/- CI over MC draws)
+    note: bound-vs-exact scale mismatch is irrelevant because only RELATIVE
+      deltas within the same model family are compared.
+  generative:
+    sampler: repo-default commit-and-freeze      # remasking dynamics are Exp 1, not Exp 0
+    n_samples: 512
+    sample_length: 1024
+    denoising_steps: 1000
+    seeds: [0, 1, 2]
+    oracle: gpt2-large
+    metrics:
+      - generative perplexity under oracle
+      - unigram entropy of samples               # degeneracy guard: low gen-ppl + low entropy = mode collapse, not quality
+  required_outputs:
+    - peak-VRAM breakdown per model per precision (weights / embeddings+head /
+      activations / logits / buffers) at the real canvas size and step count   # whitepaper §5
+
+quantization:
+  scheme: weight-only PTQ, round-to-nearest, symmetric
+  precisions:
+    int8: per-channel absmax
+    int4: per-channel absmax, group_size 128
+    ternary: absmean scaling per BitNet b1.58
+  excluded_modules: [embeddings, lm_head, layernorm, biases]   # pinned; identical for both models
+  identical_treatment: the same quantization code path is applied to dLLM and AR;
+    any dLLM-only variant (mask-aware, DLLMQuant-inspired) is reported separately
+    and never substitutes for the naive run.
+
+quantities:
+  delta: "delta(model, prec, metric) = metric_q(model, prec) / metric_fp16(model) - 1"
+  excess: "excess(prec, metric) = delta(dllm, prec) - delta(ar, prec)"
+  primary_metric: likelihood perplexity on wikitext103
+  anchor_metric: generative perplexity under oracle (with entropy guard)
+
+thresholds:
+  comparable:                                     # refinement adds no measurable fragility
+    condition: "|excess| <= 0.05 at INT8 and at INT4 on the primary metric"
+  dllm_more_robust:                               # argmax-absorption upside
+    condition: "excess <= -0.05 at INT4 on the primary metric"
+  worry_live:                                     # refinement-dynamics risk is real
+    condition: >
+      excess >= 0.25 at INT4 on the primary metric
+      AND delta(dllm, int4) >= 2 * delta(ar, int4)
+      AND the anchor metric degrades in the same direction (entropy guard passing)
+  ternary:
+    expected_uninformative: "delta > 4.0 for BOTH models (ppl ratio > 5x) — per §4.1, no conclusion"
+    trend_signal: "excess(ternary) > 2 * excess(int4), both positive -> early worry signal, feeds Exp 1"
+  non_kill_clauses:
+    - a generative-only divergence with no likelihood degradation and passing
+      entropy guard is a fidelity result, not a failure (whitepaper §4.2)
+    - no Exp 0 outcome kills the program (whitepaper §6); outcomes only route it:
+      comparable/robust -> proceed to build, science re-scopes to absorption
+      mechanism; worry_live -> Exp 1 crossover localization becomes the priority.
