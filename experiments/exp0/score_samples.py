@@ -27,9 +27,12 @@ def load_samples(path):
   csv.field_size_limit(10**8)
   for f in files:
     with open(f) as fh:
-      for row in csv.DictReader(fh):
-        s = row.get('samples', '')
-        s = s.strip("[]'\" ")
+      for row in csv.reader(fh):
+        # headerless CSV from bd3lms utils.update_and_save_csv:
+        # gen_ppl, nfes, entropy, length, samples(list-as-string), seed
+        if not row or row[0].startswith('gen_ppl'):
+          continue
+        s = row[-2].strip().strip('[]').strip('"\' ')
         if s:
           texts.append(s)
   return texts
