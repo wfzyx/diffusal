@@ -19,6 +19,9 @@ for m in ar dllm; do
     "$PYTHON" "$EXP2_DIR/run_pilot.py" "$m" "$prec" 2>&1 \
       | grep -vE "it/s" > "$log" \
       && echo "PILOT-RUN-DONE" >> "$log"
+    # keep only best*/last ckpts; intermediates are 730 MB each and filled
+    # the disk on the first pass
+    rm -f "$EXP2_DIR/runs/${m}_${prec}/checkpoints/"[0-9]*-*.ckpt
     echo "$m $prec finished ($(date)); last val: $(grep -oE 'val/ppl[^0-9]*[0-9.]+' "$log" | tail -1)"
   done
 done

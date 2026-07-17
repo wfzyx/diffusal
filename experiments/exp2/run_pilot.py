@@ -90,6 +90,10 @@ sys.argv = ['main.py', 'mode=train', 'model=tiny', 'model.length=512',
             'trainer.max_steps=6000', 'trainer.precision=16-mixed',
             'trainer.val_check_interval=1000',
             'trainer.limit_val_batches=64',
+            # ~730 MB/ckpt at 500-step cadence filled the disk (100%) and
+            # killed the first grid pass; 2000-step cadence still bounds
+            # resume loss to ~1h of compute.
+            'callbacks.checkpoint_every_n_steps.every_n_train_steps=2000',
             'optim.lr=3e-4', 'lr_scheduler.num_warmup_steps=250',
             f'checkpointing.save_dir={run_dir}',
             'wandb=null', 'seed=1', *algo_args, *extra]
