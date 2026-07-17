@@ -22,6 +22,33 @@ sys.path.insert(0, os.path.join(EXP0, 'shim'))
 model, precision, *extra = sys.argv[1:]
 assert model in ('ar', 'dllm') and precision in ('fp16', 'ternary')
 
+import torch  # noqa: E402
+
+# Resuming loads OUR OWN lightning checkpoints (written by this driver into
+# experiments/exp2/runs/). Their hyper_parameters embed the hydra config as
+# omegaconf containers, which torch's restricted unpickler structurally cannot
+# rebuild (defaultdict SETITEM is unsupported even when allowlisted). Full
+# loading is therefore enabled STRICTLY for files under our own runs dir —
+# provenance is this driver itself; all other torch.load calls keep the safe
+# weights-only default.
+_OWN_RUNS_DIR = os.path.join(EXP2, 'runs') + os.sep
+_orig_torch_load = torch.load
+
+
+def _torch_load_own_ckpts(f, *args, **kwargs):
+  # lightning opens checkpoints through fsspec, so f may be a file object;
+  # its .name carries the path.
+  if isinstance(f, (str, os.PathLike)):
+    path = os.fspath(f)
+  else:
+    path = str(getattr(f, 'name', '') or getattr(f, 'path', '') or '')
+  if path and os.path.abspath(path).startswith(_OWN_RUNS_DIR):
+    kwargs['weights_only'] = False
+  return _orig_torch_load(f, *args, **kwargs)
+
+
+torch.load = _torch_load_own_ckpts
+
 import diffusion  # noqa: E402
 import qat  # noqa: E402
 
