@@ -7,6 +7,9 @@ pre-registered thresholds ([timestamped](https://github.com/wfzyx/diffusal/relea
 
 ## Results so far
 
+![AR vs dLLM under extreme quantization — INT8/INT4 likelihood, generative anchor, and native ternary QAT gap-of-gaps](assets/bench-ar-vs-dllm.png)
+
+
 **Exp 0 — post-training quantization, likelihood** (dLLM: MDLM-owt 130M vs its
 matched AR baseline; damage relative to each model's own FP16):
 
