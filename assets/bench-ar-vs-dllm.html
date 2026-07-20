@@ -2,64 +2,65 @@
 <style>
   .viz-root {
     color-scheme: dark;
-    --surface-1:      #1a1a19;
-    --page:           #0d0d0d;
+    --page:           #0a0a0b;
+    --surface-1:      #17181c;
     --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #898781;
-    --gridline:       #2c2c2a;
-    --baseline:       #383835;
-    --border:         rgba(255,255,255,0.10);
-    --series-ar:       #3987e5;   /* categorical slot 1 — blue */
-    --series-ar-dim:    #1c5cab;
-    --series-dllm:     #d95926;   /* categorical slot 6 — orange */
-    --series-dllm-dim:  #a3431c;
-    --good:           #0ca30c;
-    --critical:       #e66767;
+    --text-secondary: #b7b6ae;
+    --text-muted:     #7d7c76;
+    --gridline:       #2c2d31;
+    --border:         rgba(255,255,255,0.08);
+    --series-ar:       #3987e5;
+    --series-dllm:     #d95926;
+    --good:           #35c95f;
+    --good-bg:        rgba(53,201,95,0.14);
+    --good-border:    rgba(53,201,95,0.30);
+    --neutral-bg:     rgba(255,255,255,0.07);
+    --pill-bg:        #1f2024;
     --font: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 
   * { box-sizing: border-box; }
-
   html, body { height: 100%; }
   body {
     margin: 0;
     background: var(--page);
     font-family: var(--font);
     color: var(--text-primary);
-    padding: 32px 16px 64px;
+    padding: 40px 20px 64px;
   }
 
-  .viz-root { max-width: 920px; margin: 0 auto; }
+  .viz-root { max-width: 980px; margin: 0 auto; }
 
   .card {
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 28px 32px 22px;
+    border-radius: 20px;
+    padding: 38px 44px 30px;
     position: relative;
     overflow: hidden;
+    box-shadow: 0 24px 60px -20px rgba(0,0,0,0.55);
   }
 
   .grad-bar {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 4px;
+    height: 6px;
     background: linear-gradient(90deg, #eda100, #3987e5, #1baf7a);
   }
 
   h1 {
-    font-size: 22px;
-    font-weight: 700;
-    margin: 14px 0 2px;
-    letter-spacing: -0.01em;
+    font-size: 28px;
+    font-weight: 800;
+    margin: 16px 0 6px;
+    letter-spacing: -0.015em;
   }
 
   .subtitle {
-    font-size: 13.5px;
+    font-size: 14.5px;
     color: var(--text-secondary);
-    margin: 0 0 14px;
+    margin: 0 0 6px;
   }
+  .subtitle b { color: var(--text-primary); font-weight: 600; }
 
   .meta-row {
     display: flex;
@@ -67,150 +68,160 @@
     align-items: baseline;
     flex-wrap: wrap;
     gap: 6px 18px;
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--text-muted);
     border-bottom: 1px solid var(--gridline);
-    padding-bottom: 14px;
-    margin-bottom: 18px;
+    padding-bottom: 18px;
+    margin-bottom: 22px;
   }
 
   .legend {
     display: flex;
-    gap: 20px;
-    font-size: 13px;
+    gap: 26px;
+    font-size: 14px;
     color: var(--text-secondary);
     margin-bottom: 4px;
   }
-  .legend .item { display: flex; align-items: center; gap: 7px; }
-  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .legend .item { display: flex; align-items: center; gap: 9px; font-weight: 500; }
+  .swatch { width: 13px; height: 13px; border-radius: 4px; flex: none; }
   .swatch.ar { background: var(--series-ar); }
   .swatch.dllm { background: var(--series-dllm); }
 
-  section.group { margin-top: 26px; }
+  section.group { margin-top: 34px; }
 
   .group-head {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-bottom: 10px;
+    margin-bottom: 16px;
+    gap: 16px;
   }
   .group-title {
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
+    letter-spacing: -0.005em;
   }
   .group-note {
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--text-muted);
     text-align: right;
+    line-height: 1.5;
+    flex: none;
   }
 
-  .metric { margin: 16px 0; }
-  .metric-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 7px;
-    gap: 12px;
-  }
+  .metric { margin: 24px 0; }
   .metric-label {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-secondary);
+    font-weight: 600;
+    margin-bottom: 10px;
   }
+
+  .metric-body {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .bars-col { flex: 1; min-width: 0; }
 
   .bar-row {
     display: flex;
     align-items: center;
-    height: 24px;
-    margin-bottom: 4px;
+    height: 28px;
+    margin-bottom: 6px;
   }
+  .bar-row:last-child { margin-bottom: 0; }
   .bar-track {
     position: relative;
-    height: 18px;
+    height: 22px;
     width: 100%;
   }
   .bar-fill {
-    height: 18px;
-    border-radius: 4px 4px 4px 0;
-    display: flex;
-    align-items: center;
+    height: 22px;
+    border-radius: 5px 5px 5px 0;
     position: relative;
-    min-width: 2px;
-    max-width: 82%;
+    max-width: 80%;
+    min-width: 3px;
   }
   .bar-fill.ar { background: var(--series-ar); }
   .bar-fill.dllm { background: var(--series-dllm); }
   .bar-value {
     position: absolute;
-    left: calc(100% + 8px);
+    left: calc(100% + 10px);
     top: 50%;
     transform: translateY(-50%);
-    font-size: 12.5px;
-    color: var(--text-primary);
+    font-size: 14px;
+    color: var(--text-secondary);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+    font-weight: 500;
   }
-  .bar-fill.lead .bar-value { font-weight: 700; }
+  .bar-fill.lead .bar-value { color: var(--text-primary); font-weight: 700; font-size: 15px; }
 
   .delta-badge {
-    font-size: 12px;
-    font-weight: 700;
-    padding: 3px 9px;
-    border-radius: 999px;
+    flex: none;
+    font-size: 14px;
+    font-weight: 800;
+    padding: 8px 16px;
+    border-radius: 10px;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    flex: none;
+    background: var(--pill-bg);
+    border: 1px solid var(--border);
   }
-  .delta-badge.good { background: rgba(12,163,12,0.16); color: #4fd44f; }
-  .delta-badge.bad { background: rgba(230,103,103,0.16); color: #f08a8a; }
-  .delta-badge.neutral { background: rgba(195,194,183,0.14); color: var(--text-secondary); }
+  .delta-badge.good { color: var(--good); background: var(--good-bg); border-color: var(--good-border); }
+  .delta-badge.neutral { color: var(--text-secondary); }
 
   .verdict-strip {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 10px;
-    margin-top: 8px;
-    padding: 9px 12px;
-    background: rgba(12,163,12,0.08);
-    border: 1px solid rgba(12,163,12,0.25);
-    border-radius: 8px;
-    font-size: 12.5px;
-    color: #8fe28f;
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: var(--good-bg);
+    border: 1px solid var(--good-border);
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #a7ecb8;
   }
   .verdict-strip .tag {
-    font-weight: 700;
-    color: #4fd44f;
+    font-weight: 800;
+    color: var(--good);
     flex: none;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
   footer.card-footer {
-    margin-top: 22px;
-    padding-top: 14px;
+    margin-top: 30px;
+    padding-top: 18px;
     border-top: 1px solid var(--gridline);
-    font-size: 11.5px;
-    line-height: 1.6;
+    font-size: 12px;
+    line-height: 1.65;
     color: var(--text-muted);
   }
-  footer.card-footer strong { color: var(--text-secondary); }
+  footer.card-footer strong { color: var(--text-secondary); font-weight: 600; }
 
-  .table-toggle {
-    margin-top: 18px;
-  }
+  .table-toggle { margin-top: 26px; }
   .table-toggle summary {
     cursor: pointer;
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-secondary);
     user-select: none;
+    font-weight: 500;
   }
   .table-toggle summary:hover { color: var(--text-primary); }
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 10px;
-    font-size: 12px;
+    margin-top: 12px;
+    font-size: 12.5px;
   }
   th, td {
     text-align: left;
-    padding: 6px 10px;
+    padding: 8px 10px;
     border-bottom: 1px solid var(--gridline);
     font-variant-numeric: tabular-nums;
   }
@@ -218,10 +229,12 @@
   td.num { text-align: right; }
   th.num { text-align: right; }
 
-  @media (max-width: 560px) {
-    .card { padding: 22px 16px 18px; }
-    .group-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+  @media (max-width: 620px) {
+    .card { padding: 28px 20px 22px; }
+    .group-head { flex-direction: column; align-items: flex-start; gap: 4px; }
     .group-note { text-align: left; }
+    .metric-body { flex-direction: column; align-items: stretch; gap: 10px; }
+    .delta-badge { align-self: flex-start; }
   }
 </style>
 
@@ -230,7 +243,7 @@
     <div class="grad-bar"></div>
 
     <h1>Diffusal — AR vs. dLLM under extreme quantization</h1>
-    <p class="subtitle">matched pairs · same authors/data/tokenizer/scale · pre-registered thresholds · single RTX 2080 Super</p>
+    <p class="subtitle">matched pairs · same authors / data / tokenizer / scale · pre-registered thresholds · single <b>RTX 2080 Super</b></p>
 
     <div class="meta-row">
       <span>MDLM-owt 130M dLLM vs. matched AR baseline (Exp 0) · tiny 7M pair, native ternary QAT (Exp 2 pilot)</span>
@@ -250,28 +263,24 @@
       </div>
 
       <div class="metric">
-        <div class="metric-head">
-          <span class="metric-label">INT8</span>
-          <span class="delta-badge neutral">Δ +0.4pp</span>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill ar" style="width:16%"><span class="bar-value">AR &nbsp;+0.1%</span></div></div>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill dllm lead" style="width:82%"><span class="bar-value">dLLM +0.5%</span></div></div>
+        <div class="metric-label">INT8</div>
+        <div class="metric-body">
+          <div class="bars-col">
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill ar" style="width:16%"><span class="bar-value">AR +0.1%</span></div></div></div>
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill dllm lead" style="width:80%"><span class="bar-value">dLLM +0.5%</span></div></div></div>
+          </div>
+          <div class="delta-badge neutral">Δ +0.4pp</div>
         </div>
       </div>
 
       <div class="metric">
-        <div class="metric-head">
-          <span class="metric-label">INT4</span>
-          <span class="delta-badge good">excess −15.3pp</span>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill ar lead" style="width:82%"><span class="bar-value">AR &nbsp;+26.8%</span></div></div>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill dllm" style="width:35%"><span class="bar-value">dLLM +11.6%</span></div></div>
+        <div class="metric-label">INT4</div>
+        <div class="metric-body">
+          <div class="bars-col">
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill ar lead" style="width:80%"><span class="bar-value">AR +26.8%</span></div></div></div>
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill dllm" style="width:35%"><span class="bar-value">dLLM +11.6%</span></div></div></div>
+          </div>
+          <div class="delta-badge good">excess −15.3pp</div>
         </div>
       </div>
 
@@ -289,15 +298,13 @@
       </div>
 
       <div class="metric">
-        <div class="metric-head">
-          <span class="metric-label">Generative perplexity delta</span>
-          <span class="delta-badge good">excess −50.8pp</span>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill ar lead" style="width:82%"><span class="bar-value">AR &nbsp;+96.2%</span></div></div>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill dllm" style="width:39%"><span class="bar-value">dLLM +45.4%</span></div></div>
+        <div class="metric-label">Generative perplexity delta</div>
+        <div class="metric-body">
+          <div class="bars-col">
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill ar lead" style="width:80%"><span class="bar-value">AR +96.2%</span></div></div></div>
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill dllm" style="width:38%"><span class="bar-value">dLLM +45.4%</span></div></div></div>
+          </div>
+          <div class="delta-badge good">excess −50.8pp</div>
         </div>
       </div>
 
@@ -315,15 +322,13 @@
       </div>
 
       <div class="metric">
-        <div class="metric-head">
-          <span class="metric-label">Ternary tax</span>
-          <span class="delta-badge good">R = 0.888</span>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill ar lead" style="width:82%"><span class="bar-value">AR &nbsp;+18.4%</span></div></div>
-        </div>
-        <div class="bar-row">
-          <div class="bar-track"><div class="bar-fill dllm" style="width:23%"><span class="bar-value">dLLM +5.2%</span></div></div>
+        <div class="metric-label">Ternary tax</div>
+        <div class="metric-body">
+          <div class="bars-col">
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill ar lead" style="width:80%"><span class="bar-value">AR +18.4%</span></div></div></div>
+            <div class="bar-row"><div class="bar-track"><div class="bar-fill dllm" style="width:23%"><span class="bar-value">dLLM +5.2%</span></div></div></div>
+          </div>
+          <div class="delta-badge good">R = 0.888</div>
         </div>
       </div>
 
