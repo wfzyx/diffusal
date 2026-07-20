@@ -1,0 +1,356 @@
+<title>Diffusal — AR vs dLLM under extreme quantization</title>
+<style>
+  .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-ar:       #3987e5;   /* categorical slot 1 — blue */
+    --series-ar-dim:    #1c5cab;
+    --series-dllm:     #d95926;   /* categorical slot 6 — orange */
+    --series-dllm-dim:  #a3431c;
+    --good:           #0ca30c;
+    --critical:       #e66767;
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--page);
+    font-family: var(--font);
+    color: var(--text-primary);
+    padding: 32px 16px 64px;
+  }
+
+  .viz-root { max-width: 920px; margin: 0 auto; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 32px 22px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .grad-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #eda100, #3987e5, #1baf7a);
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 14px 0 2px;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    font-size: 13.5px;
+    color: var(--text-secondary);
+    margin: 0 0 14px;
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    font-size: 12px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--gridline);
+    padding-bottom: 14px;
+    margin-bottom: 18px;
+  }
+
+  .legend {
+    display: flex;
+    gap: 20px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+  }
+  .legend .item { display: flex; align-items: center; gap: 7px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .swatch.ar { background: var(--series-ar); }
+  .swatch.dllm { background: var(--series-dllm); }
+
+  section.group { margin-top: 26px; }
+
+  .group-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .group-title {
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .group-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: right;
+  }
+
+  .metric { margin: 16px 0; }
+  .metric-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 7px;
+    gap: 12px;
+  }
+  .metric-label {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+  }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    margin-bottom: 4px;
+  }
+  .bar-track {
+    position: relative;
+    height: 18px;
+    width: 100%;
+  }
+  .bar-fill {
+    height: 18px;
+    border-radius: 4px 4px 4px 0;
+    display: flex;
+    align-items: center;
+    position: relative;
+    min-width: 2px;
+    max-width: 82%;
+  }
+  .bar-fill.ar { background: var(--series-ar); }
+  .bar-fill.dllm { background: var(--series-dllm); }
+  .bar-value {
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12.5px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .bar-fill.lead .bar-value { font-weight: 700; }
+
+  .delta-badge {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+  .delta-badge.good { background: rgba(12,163,12,0.16); color: #4fd44f; }
+  .delta-badge.bad { background: rgba(230,103,103,0.16); color: #f08a8a; }
+  .delta-badge.neutral { background: rgba(195,194,183,0.14); color: var(--text-secondary); }
+
+  .verdict-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 9px 12px;
+    background: rgba(12,163,12,0.08);
+    border: 1px solid rgba(12,163,12,0.25);
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: #8fe28f;
+  }
+  .verdict-strip .tag {
+    font-weight: 700;
+    color: #4fd44f;
+    flex: none;
+  }
+
+  footer.card-footer {
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid var(--gridline);
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+  footer.card-footer strong { color: var(--text-secondary); }
+
+  .table-toggle {
+    margin-top: 18px;
+  }
+  .table-toggle summary {
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .table-toggle summary:hover { color: var(--text-primary); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  th, td {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--gridline);
+    font-variant-numeric: tabular-nums;
+  }
+  th { color: var(--text-muted); font-weight: 600; }
+  td.num { text-align: right; }
+  th.num { text-align: right; }
+
+  @media (max-width: 560px) {
+    .card { padding: 22px 16px 18px; }
+    .group-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .group-note { text-align: left; }
+  }
+</style>
+
+<div class="viz-root">
+  <div class="card">
+    <div class="grad-bar"></div>
+
+    <h1>Diffusal — AR vs. dLLM under extreme quantization</h1>
+    <p class="subtitle">matched pairs · same authors/data/tokenizer/scale · pre-registered thresholds · single RTX 2080 Super</p>
+
+    <div class="meta-row">
+      <span>MDLM-owt 130M dLLM vs. matched AR baseline (Exp 0) · tiny 7M pair, native ternary QAT (Exp 2 pilot)</span>
+      <span>github.com/wfzyx/diffusal · 2026-07</span>
+    </div>
+
+    <div class="legend">
+      <span class="item"><span class="swatch ar"></span>AR (autoregressive, matched control)</span>
+      <span class="item"><span class="swatch dllm"></span>dLLM (masked diffusion)</span>
+    </div>
+
+    <!-- ================= SECTION 1 — PTQ likelihood ================= -->
+    <section class="group">
+      <div class="group-head">
+        <div class="group-title">Post-training quantization — likelihood degradation</div>
+        <div class="group-note">% worse perplexity vs. each model's own FP16<br>higher = more damage</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-head">
+          <span class="metric-label">INT8</span>
+          <span class="delta-badge neutral">Δ +0.4pp</span>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill ar" style="width:16%"><span class="bar-value">AR &nbsp;+0.1%</span></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill dllm lead" style="width:82%"><span class="bar-value">dLLM +0.5%</span></div></div>
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-head">
+          <span class="metric-label">INT4</span>
+          <span class="delta-badge good">excess −15.3pp</span>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill ar lead" style="width:82%"><span class="bar-value">AR &nbsp;+26.8%</span></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill dllm" style="width:35%"><span class="bar-value">dLLM +11.6%</span></div></div>
+        </div>
+      </div>
+
+      <div class="verdict-strip">
+        <span class="tag">dllm_more_robust</span>
+        pre-registered verdict fired — dLLM absorbs INT4 weight noise ~2× better than its AR twin, unanimous across PTB / Wikitext103 / LAMBADA.
+      </div>
+    </section>
+
+    <!-- ================= SECTION 2 — generative anchor ================= -->
+    <section class="group">
+      <div class="group-head">
+        <div class="group-title">Generative anchor — GPT-2-large oracle, INT4</div>
+        <div class="group-note">% worse generative perplexity vs. FP16<br>64 samples/condition · entropy guard passing</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-head">
+          <span class="metric-label">Generative perplexity delta</span>
+          <span class="delta-badge good">excess −50.8pp</span>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill ar lead" style="width:82%"><span class="bar-value">AR &nbsp;+96.2%</span></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill dllm" style="width:39%"><span class="bar-value">dLLM +45.4%</span></div></div>
+        </div>
+      </div>
+
+      <div class="verdict-strip">
+        <span class="tag">corroborated</span>
+        generation quality tracks likelihood, not a perplexity artifact — ternary-PTQ models fail to produce a single valid sample, either model.
+      </div>
+    </section>
+
+    <!-- ================= SECTION 3 — native ternary QAT ================= -->
+    <section class="group">
+      <div class="group-head">
+        <div class="group-title">Native ternary QAT — gap-of-gaps (pilot, single seed)</div>
+        <div class="group-note">% val-ppl cost of going FP16 → ternary<br>trained from scratch, identical recipe</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-head">
+          <span class="metric-label">Ternary tax</span>
+          <span class="delta-badge good">R = 0.888</span>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill ar lead" style="width:82%"><span class="bar-value">AR &nbsp;+18.4%</span></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-track"><div class="bar-fill dllm" style="width:23%"><span class="bar-value">dLLM +5.2%</span></div></div>
+        </div>
+      </div>
+
+      <div class="verdict-strip">
+        <span class="tag">comparable</span>
+        ratio of gaps lands in the pre-registered "no extra ternary tax" band, near the dLLM-better boundary. Single seed — direction, not a claim.
+      </div>
+    </section>
+
+    <details class="table-toggle">
+      <summary>Show underlying numbers</summary>
+      <table>
+        <thead>
+          <tr><th>metric</th><th class="num">AR</th><th class="num">dLLM</th><th class="num">excess / ratio</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>INT8 ppl delta</td><td class="num">+0.1%</td><td class="num">+0.5%</td><td class="num">+0.4pp</td></tr>
+          <tr><td>INT4 ppl delta (Wikitext103)</td><td class="num">+26.8%</td><td class="num">+11.6%</td><td class="num">−15.3pp</td></tr>
+          <tr><td>INT4 gen-ppl delta (GPT-2-large)</td><td class="num">+96.2%</td><td class="num">+45.4%</td><td class="num">−50.8pp</td></tr>
+          <tr><td>ternary val ppl (pilot, best)</td><td class="num">60.12 / 50.77</td><td class="num">103.05 / 97.97</td><td class="num">R=0.888</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <footer class="card-footer">
+      <strong>Same protocol both sides</strong> — identical quantization code path, identical eval harness, matched scale/data/tokenizer/recipe. Naive round-to-nearest PTQ (no calibration) by design: the AR control, not calibration tricks, carries the comparison. Ternary PTQ (both models, either experiment) fails catastrophically — expected per BitNet's own premise, pre-registered as uninformative, not shown as a bar.<br>
+      Pre-registered thresholds &amp; kill criteria tagged before each run: <strong>prereg-exp0-2026-07-16</strong>, <strong>prereg-exp2-pilot-2026-07-16.1</strong> · raw configs &amp; results: <strong>github.com/wfzyx/diffusal</strong>
+    </footer>
+  </div>
+</div>
