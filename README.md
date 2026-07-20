@@ -7,6 +7,8 @@ pre-registered thresholds ([timestamped](https://github.com/wfzyx/diffusal/relea
 
 ## Results so far
 
+Full summary with caveats and next steps: [FINDINGS.md](FINDINGS.md).
+
 ![AR vs dLLM under extreme quantization — INT8/INT4 likelihood, generative anchor, and native ternary QAT gap-of-gaps](assets/bench-ar-vs-dllm.png)
 
 
