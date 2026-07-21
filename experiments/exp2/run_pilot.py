@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.join(EXP0, 'shim'))
 
 model, precision, *extra = sys.argv[1:]
 assert model in ('ar', 'dllm') and precision in ('fp16', 'ternary')
+seed = os.environ.get('EXP2_SEED', '1')
+assert seed.isdecimal() and int(seed) > 0, 'EXP2_SEED must be a positive integer'
 
 import torch  # noqa: E402
 
@@ -76,8 +78,11 @@ def patched_setup(self, stage=None):
 
 diffusion.Diffusion.setup = patched_setup
 
-run_dir = os.path.join(EXP2, 'runs', f'{model}_{precision}')
+# Keep the completed pilot paths unchanged; later seeds must never resume it.
+run_dir = os.path.join(EXP2, 'runs', f'{model}_{precision}') if seed == '1' \
+  else os.path.join(EXP2, 'runs', f'seed-{seed}', f'{model}_{precision}')
 os.makedirs(run_dir, exist_ok=True)
+print(f'[exp2] seed={seed} run_dir={run_dir}', file=sys.stderr)
 
 algo_args = ['algo=ar'] if model == 'ar' else ['algo=mdlm']
 
@@ -96,7 +101,7 @@ sys.argv = ['main.py', 'mode=train', 'model=tiny', 'model.length=512',
             'callbacks.checkpoint_every_n_steps.every_n_train_steps=2000',
             'optim.lr=3e-4', 'lr_scheduler.num_warmup_steps=250',
             f'checkpointing.save_dir={run_dir}',
-            'wandb=null', 'seed=1', *algo_args, *extra]
+            'wandb=null', f'seed={seed}', *algo_args, *extra]
 
 os.environ.setdefault('WANDB_MODE', 'offline')
 os.chdir(BD3LMS)
