@@ -1,0 +1,51 @@
+# Exp 2 replication: native ternary QAT, three matched training seeds.
+# Freeze by commit and tag before seed 2 starts. Seed 1 is the completed,
+# unchanged prereg-exp2-pilot-2026-07-16.1 run; this config governs seeds 2/3
+# and the pre-specified pooled analysis.
+
+meta:
+  experiment: exp2-replication
+  parent: exp2-pilot
+  paper: whitepaper/diffusal-whitepaper.pdf
+  status: frozen-on-commit
+
+cohort:
+  seeds: [1, 2, 3]
+  existing_seed: 1
+  runs_to_execute: [2, 3]
+  cells:
+    - {model: ar, precision: fp16}
+    - {model: ar, precision: ternary}
+    - {model: dllm, precision: fp16}
+    - {model: dllm, precision: ternary}
+
+# Exactly the pilot recipe. See configs/exp2-pilot.yaml for the full frozen
+# architecture, data, QAT exclusions, hardware, and implementation notes.
+recipe:
+  inherits: configs/exp2-pilot.yaml
+  changes: none
+
+quantities:
+  metric: best validation perplexity on wikitext103; dLLM is its NELBO bound
+  gap: "gap(model, seed) = ppl(model, ternary, seed) / ppl(model, fp16, seed)"
+  ratio: "R(seed) = gap(dllm, seed) / gap(ar, seed)"
+  unit_of_analysis: matched training seed
+  summary: mean and standard deviation of log(R), with a two-sided 95% t-interval
+
+thresholds:
+  no_extra_ternary_tax: "upper 95% CI(R) <= 1.25"
+  dllm_better: "upper 95% CI(R) < 0.80"
+  dllm_worse: "lower 95% CI(R) > 1.25"
+  otherwise: inconclusive
+
+required_outputs:
+  - raw per-seed FP16 and ternary validation metrics
+  - checkpoint hashes and exact commands
+  - restart/failure history
+  - locked generative-quality evaluation for every final checkpoint
+  - repository revision and environment versions
+
+non_claims:
+  - no claim beyond the matched tiny-model, Wikitext103 setup
+  - no claim of superior ternary tolerance unless the dllm_better criterion fires
+  - no selective checkpoint or seed exclusion; report every completed cell
