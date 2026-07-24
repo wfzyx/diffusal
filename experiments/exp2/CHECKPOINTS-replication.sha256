@@ -1,0 +1,12 @@
+5f34fa67e137136000688824686a7680a19c73aabe23f5b2c6ede7688b5011b2  ../experiments/exp2/runs/ar_fp16/checkpoints/best.ckpt
+1f4fb74e03c3defdfc3fe69f098acbad8630e764552b6eeaffc175bf0c1b96a7  ../experiments/exp2/runs/ar_ternary/checkpoints/best-v1.ckpt
+5b31130d512f438d79e901ccade09e4e60c03bd2318faf90c5e5685758ce2d62  ../experiments/exp2/runs/dllm_fp16/checkpoints/best-v1.ckpt
+61d2cd5b0833f9e5f8479ba39a6e581aa86186e07ed78805ae70b7ddf85f7cd0  ../experiments/exp2/runs/dllm_ternary/checkpoints/best.ckpt
+3d3c86dfb14d480ae7247ce09e2e355c3ca2f4d7ea3773767a134a89ade0f462  ../experiments/exp2/runs/seed-2/ar_fp16/checkpoints/best.ckpt
+90274b51b4f5856d2432cd125abb29a558383d8ac95c2fb5798997f2db4023fe  ../experiments/exp2/runs/seed-2/ar_ternary/checkpoints/best.ckpt
+5cbc878b12c5c0502d3d3d5d4f691b7442909db84dd15b92586f834cb4215785  ../experiments/exp2/runs/seed-2/dllm_fp16/checkpoints/best.ckpt
+23d45175bdf0dc98a4f354f79cca98eaac219bb06a1f67e31822e8e4d878d10b  ../experiments/exp2/runs/seed-2/dllm_ternary/checkpoints/best.ckpt
+e6672bdde406ad605bd11b3a84db756359826ba4779655461f0fdb68ed5a40c4  ../experiments/exp2/runs/seed-3/ar_fp16/checkpoints/best.ckpt
+692c6cf91c8f3849081e9a7fb069ce1764e2ef54d116aee2c8dd8ad650c17bc9  ../experiments/exp2/runs/seed-3/ar_ternary/checkpoints/best.ckpt
+63a583613aa8b56bed34295461107b7befc25d68d1887c32c81eb1c582eb7ee4  ../experiments/exp2/runs/seed-3/dllm_fp16/checkpoints/best.ckpt
+423cf01119266cff37e604a7c4c43825fbe6e1636291654bd398b3b327c6495f  ../experiments/exp2/runs/seed-3/dllm_ternary/checkpoints/best.ckpt
