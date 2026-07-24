@@ -1,0 +1,165 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+
+\setlist{itemsep=2pt, topsep=4pt}
+
+\title{\textbf{Masked Diffusion Language Models Absorb Extreme Weight\\
+Quantization Better Than Autoregressive Models at Matched Scale}}
+\author{Victor Panisa\\\texttt{victor.panisa@gmail.com}}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We ask whether masked diffusion language models (dLLMs) tolerate extreme weight quantization better than autoregressive (AR) models of matched scale, data, tokenizer, and training recipe. The question is only meaningful against a matched control: extreme post-training quantization (PTQ) fails on \emph{every} architecture, so a dLLM failing in isolation says nothing about diffusion. We therefore report only the \textbf{excess} degradation of the dLLM over its AR twin. In two matched setups, the dLLM is the more robust model. \textbf{(1) Post-training quantization at 130M:} MDLM-owt and the same release's AR baseline---same authors, data, scale, codebase---are quantized identically; at INT4 the AR model degrades $+25$--$32\%$ in validation likelihood while the dLLM degrades only $+9$--$21\%$, an excess of \textbf{$-11$ to $-16$ percentage points}, unanimous across PTB / Wikitext103 / LAMBADA. A generative anchor (64 samples/condition, GPT-2-large oracle) corroborates: AR generated-text perplexity worsens $+96.2\%$ at INT4 versus $+45.4\%$ for the dLLM ($-50.8$pp excess), ruling out a likelihood-only artifact. \textbf{(2) Native ternary QAT at 7M:} twelve models trained from scratch (AR/dLLM $\times$ FP16/ternary-QAT $\times$ three seeds) give a geometric-mean gap ratio $R = 0.890$, 95\% CI $[0.872, 0.908]$: the dLLM pays \emph{no extra} ternary tax, though the stricter ``materially better'' criterion (upper CI $< 0.80$) does not fire. We also report two negative mechanism probes that reject the tempting ``token commitment absorbs errors'' story: changing eight fixed tokens propagates to $\sim$66\% of downstream positions under commit-and-freeze (FP16 and ternary statistically indistinguishable), and a post-hoc revisable retrofit reaches $\sim$98\%. The robustness is real and replicated; the obvious explanation for it is not supported. We release all configs, checkpoint hashes, and pre-registrations. This paper makes no claim about absolute dLLM quality, scale transfer beyond the tested points, deployment economics, or a mechanism.
+\end{abstract}
+
+\section{Introduction}
+
+Extreme weight quantization---INT4 and below, down to ternary $\{-1, 0, +1\}$ (BitNet b1.58~\cite{bitnet})---is the main lever for shrinking LLM memory, and autoregressive (AR) decoders are the default target. Masked diffusion language models (MDLM~\cite{mdlm}, LLaDA~\cite{llada}, and block-diffusion variants) generate by iteratively refining a token canvas rather than emitting strictly left to right, and it is not known whether that different computation makes them more or less fragile under aggressive quantization.
+
+This paper isolates one comparison and answers it cleanly: \emph{at matched scale, data, tokenizer, and recipe, does extreme weight quantization degrade a dLLM more than an AR model?} Our answer, at the two scales we can afford to control confound-free, is \textbf{no---and at INT4 the dLLM is clearly more robust}. We are explicit about what this does and does not establish (\S\ref{sec:limitations}).
+
+\paragraph{Contributions.}
+\begin{enumerate}
+\item A matched 130M INT4 PTQ result showing the dLLM absorbs $\sim$2$\times$ less degradation than its AR twin, unanimous across three datasets and corroborated by a generative anchor (\S\ref{sec:ptq}--\ref{sec:anchor}).
+\item A three-seed native ternary-QAT result at 7M showing no extra diffusion tax, $R = 0.890$ (\S\ref{sec:qat}).
+\item Two honest negative mechanism probes that reject ``commitment $=$ error absorption'' (\S\ref{sec:mechanism}).
+\item A full reproducibility release: configs, checkpoint hashes, pre-registrations.
+\end{enumerate}
+
+\section{Related Work}
+
+\paragraph{Quantization of diffusion.} Timestep-aware quantization for \emph{continuous image} diffusion (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}) established that quantization error accumulates non-uniformly across denoising steps and that step-dependent precision is the mitigation. We do not re-derive this. Our setting is discrete \emph{text} diffusion, where the per-step operation includes an argmax commitment with no continuous analogue. DLLMQuant~\cite{dllmquant} studies PTQ for diffusion LLMs specifically; we differ by insisting on a matched AR control, so the reported quantity is diffusion-specific excess, not dLLM degradation in isolation.
+
+\paragraph{Low-bit LLMs.} BitNet b1.58~\cite{bitnet} argues native ternary training is competitive from $\sim$3B parameters upward; below that, ternary underperforms FP16 \emph{for reasons unrelated to diffusion}. This is exactly why our QAT result reports a gap-of-gaps, not an absolute number.
+
+\paragraph{Masked diffusion LMs and samplers.} MDLM~\cite{mdlm} and LLaDA~\cite{llada} make iterative text denoising a real compression target. We note (and use) that the common ``remasking''-named samplers of LLaDA and Dream are in fact commit-and-freeze---LLaDA's low-confidence mode assigns $-\infty$ to unmasked positions, so a committed token never re-enters play. Genuine remasking exists as an inference-time retrofit (ReMDM~\cite{remdm}). Sampler family is tracked with every trajectory claim.
+
+\section{Setup}
+
+\paragraph{Matched-control principle.} Ternary/INT4 PTQ fails on all architectures, so we never report dLLM degradation alone. The evidence is always the excess
+\[
+\text{excess} = (\text{dLLM}_{\text{quant}} - \text{dLLM}_{\text{FP16}}) - (\text{AR}_{\text{quant}} - \text{AR}_{\text{FP16}})
+\]
+at identical precision, scale, data, tokenizer, and recipe.
+
+\paragraph{PTQ pair (130M).} Primary dLLM: \texttt{kuleshov-group/mdlm-owt} ($\sim$130M non-embedding, GPT-2 tokenizer, OpenWebText). Matched AR control: the same release's \texttt{ar.ckpt}, trained by the same authors on the same data at the same scale in the same codebase. Both evaluated at \texttt{model.length=1024} with the repo's \texttt{data=openwebtext-split} config (tokenizer verified identical). Naive round-to-nearest PTQ at INT8, INT4, ternary. Evaluation runs through the bd3lms codebase (the mdlm repo's zero-shot eval cannot reproduce its own published numbers) with a numerically-validated flash-attention$\to$SDPA shim.
+
+\paragraph{QAT pair (7M).} Twelve models trained from scratch on Wikitext103: \{AR, dLLM\} $\times$ \{FP16, ternary-QAT\} $\times$ \{seed 1,2,3\}. Tiny BD3LMS backbone ($\sim$7M non-embedding params), 6{,}000 steps, global batch 64. Ternarization is BitNet-style absmean with a straight-through estimator; embeddings, output head, norms, and biases are excluded (21.5\% of model-state params ternarized---a limitation, \S\ref{sec:limitations}).
+
+\paragraph{Metrics.} PTQ: validation-likelihood degradation relative to each model's own FP16, plus a generative anchor (64 samples/condition, GPT-2-large oracle perplexity, with a unigram-entropy degeneracy guard). QAT: per-model ``tax'' $=$ ternary/FP16 relative degradation, summarized by the gap ratio $R = \text{dLLM-tax} / \text{AR-tax}$.
+
+\paragraph{Pre-registration.} Kill criteria and the \texttt{dllm\_more\_robust} / \texttt{dllm\_better} thresholds were declared before runs (timestamped release tags \texttt{prereg-exp0-2026-07-16}, \texttt{prereg-exp2-pilot-2026-07-16.1}).
+
+\section{Results}
+
+\subsection{Post-training quantization at 130M (primary)}
+\label{sec:ptq}
+
+Degradation relative to each model's own FP16:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+precision & AR degradation & dLLM degradation & excess (dLLM $-$ AR) \\
+\midrule
+INT8 & $\sim$0\% & $+0.3$--$0.6\%$ & $\le +0.7$pp \\
+INT4 & $+25$--$32\%$ & $+9$--$21\%$ & $\mathbf{-11}$ \textbf{to} $\mathbf{-16}$\textbf{pp} \\
+ternary & $\sim$$10^4\times$ FP16 & $\sim$$10^{12}\times$ FP16 & uninformative (pre-reg.) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At INT4 the dLLM absorbs weight-quantization noise roughly 2$\times$ better than its AR twin, unanimous across PTB / Wikitext103 / LAMBADA. The pre-registered \texttt{dllm\_more\_robust} verdict fired. Ternary PTQ collapses on both, exactly as BitNet's premise predicts---pre-registered as uninformative.
+
+\subsection{Generative anchor (corroboration)}
+\label{sec:anchor}
+
+64 samples/condition, GPT-2-large oracle, degeneracy guard passed wherever sampling succeeded.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+precision & AR gen-ppl $\Delta$ & dLLM gen-ppl $\Delta$ & excess \\
+\midrule
+INT4 & $+96.2\%$ & $+45.4\%$ & $\mathbf{-50.8}$\textbf{pp} \\
+ternary & guard trips & guard trips & uninformative \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The dLLM's \emph{generated text} degrades $\sim$2$\times$ less than the AR model's at INT4. The likelihood result is not a perplexity artifact.
+
+\subsection{Native ternary QAT at 7M (supporting)}
+\label{sec:qat}
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+seed & AR tax & dLLM tax & gap ratio $R$ \\
+\midrule
+1 & $+18.41\%$ & $+5.19\%$ & 0.888 \\
+2 & $+30.71\%$ & $+15.43\%$ & 0.883 \\
+3 & $+16.12\%$ & $+4.23\%$ & 0.898 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Geometric-mean $R = 0.890$, 95\% $t$ CI $[0.872, 0.908]$. The pre-registered no-extra-tax criterion fires (upper CI $\le 1.25$). The stricter \texttt{dllm\_better} criterion (upper CI $< 0.80$) does \emph{not}. Reading: diffusion pays no extra ternary tax at this scale, but this is not evidence of \emph{superior} tolerance---and see \S\ref{sec:limitations} for the confounds specific to this rung.
+
+\subsection{Mechanism probes (honest negatives)}
+\label{sec:mechanism}
+
+The tempting explanation is that argmax commitment absorbs errors: a sub-margin logit perturbation leaves the committed token unchanged. We tested whether that produces \emph{end-to-end} absorption.
+
+\begin{itemize}
+\item \textbf{Commit-and-freeze, 96 trajectories.} Changing eight fixed tokens propagated to \textbf{65.7\% (FP16) vs 66.3\% (ternary)} of downstream positions. Three-seed ternary-minus-FP16 interval $[-2.2, +3.3]$pp---no resolved precision effect. A wrong frozen token remains conditioning context; perturbations grow, not shrink.
+\item \textbf{Post-hoc revisable retrofit.} $\sim$98\% disagreement---revision applied to a model not trained for it is not corrective.
+\end{itemize}
+
+Both reject ``commitment automatically erases fixed-token errors.'' The robustness in \S\ref{sec:ptq}--\ref{sec:qat} is real but is \emph{not} explained by this mechanism.
+
+\section{Reproducibility}
+
+Single RTX 2080 Super (8GB, sm75, no FlashAttention-2). All configs, checkpoint SHA-256 hashes, pre-registration tags, and the flash-attention$\to$SDPA numerical-equivalence shim are released. Full bring-up log and dependency pins accompany the code; raw perplexities and hashes are in the replication results.
+
+\section{Limitations}
+\label{sec:limitations}
+
+\begin{itemize}
+\item \textbf{Scale.} Smallest matched PTQ pair is 130M; QAT pair is $\sim$7M. Nothing here transfers to 1B$+$ without evidence.
+\item \textbf{The QAT rung is confounded three ways.} At 7M, ternary is below BitNet's $\sim$3B competitiveness threshold, only 21.5\% of params are ternarized, and the dLLM objective is a NELBO bound rather than exact likelihood. The 130M INT4 PTQ result carries none of these; treat it as the spine and QAT as the riskier supporting evidence.
+\item \textbf{No absolute-quality parity claim.} dLLMs lose to AR on absolute quality at these scales regardless of quantization. This paper is about \emph{relative sensitivity to quantization}, not usefulness.
+\item \textbf{PTQ method.} Naive round-to-nearest throughout, by design---the matched control, not calibration engineering, carries the claim.
+\item \textbf{No mechanism.} \S\ref{sec:mechanism} rejects the obvious one and offers no replacement.
+\item \textbf{No deployment claim.} Only 21.5\% of params ternarized; weight-only idealized reduction is $\sim$1.23$\times$. No packed-ternary kernel, latency, or VRAM claim is made.
+\end{itemize}
+
+\section{Conclusion}
+
+At matched scale, data, tokenizer, and recipe, masked diffusion language models absorb extreme weight quantization better than autoregressive models---clearly so at INT4 (130M, $\sim$2$\times$, three datasets, corroborated generatively), and with no extra ternary tax under native QAT (7M, three seeds). The effect is robust and replicated. The intuitive mechanism---token commitment as an error-absorbing quantizer---does not survive testing. We publish the effect, the negative mechanism result, and a full reproducibility release, and leave scale transfer and deployment to future work.
+
+\begin{thebibliography}{9}
+\bibitem{bitnet} S. Ma et al. \emph{The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits} (BitNet b1.58). arXiv:2402.17764.
+\bibitem{mdlm} S. Sahoo et al. \emph{Simple and Effective Masked Diffusion Language Models} (MDLM). arXiv:2406.07524.
+\bibitem{llada} \emph{Large Language Diffusion Models} (LLaDA). arXiv:2502.09992.
+\bibitem{dllmquant} C. Xu et al. \emph{DLLMQuant: Quantizing Diffusion-based Large Language Models}. arXiv:2508.14090.
+\bibitem{remdm} G. Wang, Y. Schiff, S. Sahoo, V. Kuleshov. \emph{Remasking Discrete Diffusion Models with Inference-Time Scaling} (ReMDM). arXiv:2503.00307.
+\bibitem{ptq4dm} Y. Shang et al. \emph{Post-training Quantization on Diffusion Models} (PTQ4DM). arXiv:2211.15736.
+\bibitem{qdiffusion} X. Li et al. \emph{Q-Diffusion: Quantizing Diffusion Models}. arXiv:2302.04304.
+\bibitem{tdq} J. So et al. \emph{Temporal Dynamic Quantization for Diffusion Models} (TDQ). arXiv:2306.02316.
+\end{thebibliography}
+
+\end{document}
