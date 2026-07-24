@@ -7,7 +7,7 @@ pre-registered thresholds ([timestamped](https://github.com/wfzyx/diffusal/relea
 
 ## Results so far
 
-Full summary with caveats and next steps: [FINDINGS.md](FINDINGS.md).
+The publishable finding, with caveats and limitations: [ARXIV-PAPER.md](ARXIV-PAPER.md).
 
 ![AR vs dLLM under extreme quantization — INT8/INT4 likelihood, generative anchor, and native ternary QAT gap-of-gaps](assets/bench-ar-vs-dllm.png)
 
@@ -30,46 +30,57 @@ entropy guard passing): INT4 costs the AR model **+96%** generative perplexity
 vs **+45%** for the dLLM. Ternary-PTQ models fail to produce a single valid
 sample. Corroborates the likelihood result — not a perplexity artifact.
 
-**Exp 2 pilot — native ternary QAT** (4 matched tiny models trained from
-scratch, BitNet-style STE, identical recipe, single seed):
+**Exp 2 — native ternary QAT replication** (12 matched tiny models trained
+from scratch, BitNet-style STE, identical recipe, three seeds):
 
-| model | fp16 val ppl | ternary val ppl | ternary tax |
-|---|---:|---:|---:|
-| AR | 50.77 | 60.12 | **+18.4%** |
-| dLLM | 97.97 | 103.05 | **+5.2%** |
+| metric | result |
+|---|---:|
+| AR ternary tax | +16.1% to +30.7% |
+| dLLM ternary tax | +4.2% to +15.4% |
+| gap ratio R (dLLM tax / AR tax) | 0.883 to 0.898 |
+| geometric mean R (95% t CI) | **0.890 [0.872, 0.908]** |
 
-→ Ratio of gaps **R = 0.888**: pre-registered **`comparable`** verdict
-(diffusion pays no extra ternary tax), near the `dllm_better` boundary.
-Single seed — a direction, not a claim.
+→ The pre-registered **no-extra-dLLM-tax** criterion fires (upper CI 0.908
+≤ 1.25). The stronger pre-registered `dllm_better` criterion does not: its
+required upper CI below 0.80 was not met. This is a three-seed, 7M-scale,
+Wikitext103 feasibility result—not evidence of superior diffusion tolerance.
 
-Details, caveats, and raw numbers: [experiments/exp0/RESULTS.md](experiments/exp0/RESULTS.md),
-[experiments/exp2/RESULTS-pilot.md](experiments/exp2/RESULTS-pilot.md).
+Details, caveats, raw values, and checkpoint hashes:
+[experiments/exp0/RESULTS.md](experiments/exp0/RESULTS.md),
+[experiments/exp2/RESULTS-replication.md](experiments/exp2/RESULTS-replication.md).
 
 ## Why this might happen
 
-Token commitment in masked diffusion is itself a quantizer: a logit
-perturbation smaller than the gap to the runner-up token vanishes entirely at
-argmax time. Iterative refinement may absorb sub-threshold quantization noise
-that an autoregressive model must carry forward. The next experiment (Exp 1)
-measures this directly: inject controlled perturbations mid-generation and
-track whether the dynamics contracts or amplifies them, as a function of mask
-fraction, under genuine remasking (ReMDM) vs commit-and-freeze sampling.
+At a fixed position and commit set, a sub-margin logit perturbation can leave
+an argmax token unchanged. That limited identity preservation is not general
+error absorption: in 96 native commit-and-freeze trajectories, changing eight
+fixed tokens caused 65.7% FP16 and 66.3% ternary-QAT later-token disagreement;
+the QAT-minus-FP16 interval was [-2.2, +3.3] points. A wrong committed token
+remains conditioning context. See
+[the exploratory result](experiments/exp2/RESULTS-contractivity.md).
+This concerns the local commit-and-freeze sampler, not DiffusionGemma: its
+entropy-bound sampler re-noises non-accepted canvas tokens and recomputes
+acceptance each step. A custom post-hoc revisable-remasking probe also failed
+to absorb perturbations (~98% disagreement), but it was not trained under that
+sampler and is not evidence about DiffusionGemma. Next: train and evaluate a
+matched native revisable model under one frozen corruption/sampler pair.
 
 ## The program
 
 Measurement-then-build, defined in the
 [whitepaper](whitepaper/diffusal-whitepaper.pdf) ([LaTeX](whitepaper/diffusal-whitepaper.tex))
-and [THESIS.md](THESIS.md):
+and [PHD-THESIS.md](PHD-THESIS.md):
 
 1. **Exp 0 (done):** PTQ degradation with matched AR controls — the *excess*
    is the only admissible evidence about diffusion.
-2. **Exp 1 (next):** error-trajectory dynamics — per-step distortion vs
-   feedback amplification, decomposed via teacher-forced / free-running /
-   perturbation-injection protocols.
-3. **Exp 2 (pilot done):** native ternary QAT with matched AR controls — the
-   go/no-go is the gap-of-gaps, not absolute wins. End goal: a natively
-   ternary (1.58-bit) masked diffusion model via AR-to-diffusion conversion
-   at ~2–3B, where BitNet says ternary reaches parity.
+2. **Exp 1 (two exploratory sampler conditions):** native commit-and-freeze
+   and a post-hoc custom revisable sampler both propagated perturbations, with
+   no resolved QAT effect. Next: train a matched native revisable condition.
+3. **Exp 2 (three-seed replication done):** native ternary QAT with matched
+   AR controls — the gap-of-gaps supports no extra dLLM tax at toy scale, not
+   superior tolerance. End goal: a natively ternary (1.58-bit) masked
+   diffusion model via AR-to-diffusion conversion at ~2–3B, where BitNet says
+   ternary reaches parity.
 
 Every experiment carries pre-registered thresholds and kill criteria
 ([configs/](configs/)), frozen and tagged before runs; amendments are new
@@ -78,9 +89,10 @@ tagged commits with justification.
 ## What this is not
 
 Not "a 25B ternary dLLM in 6 GB" — activations, logits, and buffers dominate
-at small scale (measured: the fp32 logits buffer, not weights, is what OOMs
-an 8 GB card). Not a claim about 7B+ models. Not calibrated PTQ — naive RTN
-by design, so the AR control carries the comparison.
+at small scale; in the current QAT checkpoint only 21.5% of model-state
+parameters are ternarized, for an idealized weight-only reduction of 1.23×.
+Not a claim about 7B+ models. Not calibrated PTQ — naive RTN by design, so the
+AR control carries the comparison.
 
 ## Reproduce
 

@@ -4,10 +4,10 @@ PANDOC_FLAGS = --pdf-engine=typst -V margin-x=2cm -V margin-y=2.5cm
 
 all: build
 
-build: THESIS.pdf
+build: ARXIV-PAPER.pdf PHD-THESIS.pdf
 
-THESIS.pdf: THESIS.md
+%.pdf: %.md
 	pandoc $< -o $@ $(PANDOC_FLAGS)
 
 clean:
-	rm -f THESIS.pdf
+	rm -f ARXIV-PAPER.pdf PHD-THESIS.pdf
