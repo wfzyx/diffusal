@@ -1,0 +1,73 @@
+# Exp 2 — 130M native ternary QAT gap-of-gaps (the "twin" of the Exp 0 PTQ scale)
+#
+# STATUS: FROZEN on commit+tag (prereg-exp2-qat130m-2026-07-24). Budget approved
+# at 40k steps 2026-07-24. No amendment after this without a new tagged commit.
+# This is the same frozen recipe as exp2-replication, scaled from bd3lms
+# model=tiny (~7M) to model=small (~130M) — the exact MDLM-owt size used for the
+# Exp 0 PTQ result, so PTQ and QAT sit at one matched scale.
+#
+# Purpose: rebut "the only from-scratch ternary result is a 7M toy" before the
+# HN/Reddit push (see NEXT-STEPS.md). Adds one row to ARXIV-PAPER.md §4.3.
+
+meta:
+  experiment: exp2-qat130m
+  parent: exp2-replication
+  paper: ARXIV-PAPER.md            # §4.3; and whitepaper/diffusal-whitepaper.tex §Exp2
+  status: frozen-on-commit
+
+cohort:
+  seeds: [1, 2, 3]
+  cells:
+    - {model: ar,   precision: fp16}
+    - {model: ar,   precision: ternary}
+    - {model: dllm, precision: fp16}
+    - {model: dllm, precision: ternary}
+  # 4 cells x 3 seeds = 12 runs.
+
+recipe:
+  inherits: configs/exp2-replication.yaml   # QAT wrapper, exclusions, metric all identical
+  changes:
+    architecture: bd3lms model=small (hidden 768, 12 blocks, 12 heads, tied
+      embeddings, length 1024, GPT-2 tokenizer) — ~130M non-embedding params.
+      Same algo split as the pilot: algo=ar vs algo=mdlm (block_size = length).
+    data: wikitext103 train, blocks of 1024 (native small length; the pilot
+      used 512 on the 8GB card — length is a recipe change, applied IDENTICALLY
+      to AR and dLLM so the gap-of-gaps stays valid).
+    # ---- APPROVED 2026-07-24: 40k steps (~2.62B tokens) ----
+    budget: 40000 steps x global batch 64 x 1024 tokens (~2.62B tokens) per run.
+      Rationale: matches the 7M pilot's training intensity (~20x params in
+      tokens) so the 130M runs cannot be dismissed as under-trained relative to
+      the pilot; both models get the identical budget. lr 3e-4, warmup 2000,
+      fp16 mixed precision, EMA 0.9999 (pilot values, warmup scaled to the
+      longer run). Est. ~$15-20 total on spot L4.
+    hardware: 1x NVIDIA L4 (24GB, sm89, Ada) on GCP g2-standard-8, spot.
+      FlashAttention-2 IS supported on sm89, but we REUSE the exp0 SDPA shim for
+      numerical parity with the 7M runs. micro_batch 8 x grad_accum 8 = global 64
+      (tunable; lower micro_batch on OOM — fp32 vocab logits dominate memory).
+    attn: experiments/exp0/shim (SDPA + plain-torch rotary), same as 7M.
+
+quantities:
+  metric: best validation perplexity on wikitext103; dLLM value is its NELBO bound
+  gap: "gap(model, seed) = ppl(model, ternary, seed) / ppl(model, fp16, seed)"
+  ratio: "R(seed) = gap(dllm, seed) / gap(ar, seed)"
+  unit_of_analysis: matched training seed
+  summary: mean and standard deviation of log(R), two-sided 95% t-interval
+
+thresholds:                          # identical to the 7M replication pre-reg
+  no_extra_ternary_tax: "upper 95% CI(R) <= 1.25"
+  dllm_better:          "upper 95% CI(R) < 0.80"
+  dllm_worse:           "lower 95% CI(R) > 1.25"
+  otherwise: inconclusive
+
+required_outputs:
+  - raw per-seed FP16 and ternary validation metrics
+  - checkpoint SHA-256 hashes and exact commands
+  - restart/failure history
+  - repository revision and environment versions (pip freeze on the VM)
+  - GCS bucket path of the synced run artifacts
+
+non_claims:
+  - no claim beyond the matched 130M, Wikitext103 setup
+  - no claim of superior ternary tolerance unless the dllm_better criterion fires
+  - no selective checkpoint or seed exclusion; report every completed cell
+  - scale transfer past 130M remains unproven (that is a later rung, PHD-THESIS §5)
