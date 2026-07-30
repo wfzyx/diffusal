@@ -1,6 +1,6 @@
 # arXiv submission — checklist and metadata
 
-Source of truth for content: [../ARXIV-PAPER.md](../ARXIV-PAPER.md). This directory holds the LaTeX build that goes to arXiv.
+Source of truth for the submission: [`diffusal-arxiv.tex`](diffusal-arxiv.tex). This directory holds the LaTeX build that goes to arXiv.
 
 ## Files in this submission
 
@@ -29,7 +29,7 @@ Confirm the PDF renders both tables and the abstract with no overfull-box disast
 ## Submission metadata (fill into the arXiv form)
 
 - **Title:** Masked Diffusion Language Models Absorb Extreme Weight Quantization Better Than Autoregressive Models at Matched Scale
-- **Authors:** Victor Panisa
+- **Authors:** Victor Hugo Panisa Bezerra
 - **Primary category:** `cs.LG` (Machine Learning)
 - **Cross-list:** `cs.CL` (Computation and Language)
 - **License:** recommend CC BY 4.0 (or arXiv's non-exclusive default if you prefer).
@@ -47,8 +47,8 @@ Confirm the PDF renders both tables and the abstract with no overfull-box disast
 ## Version plan
 
 - **v1 (now):** PTQ spine (130M) + 7M QAT + mechanism negatives. Ship to arXiv; do **not** push to HN/Reddit yet.
-- **v2 (before HN/Reddit):** add the 130M native-QAT twin — a new row in the §4.3 table plus one paragraph. This is the specific rebuttal to "the only from-scratch ternary result is a 7M toy." Requires a rented 24–40GB GPU (does not fit the local 8GB card). See [../PHD-THESIS.md](../PHD-THESIS.md) §5.2.
+- **v2 (before HN/Reddit):** add the 130M native-QAT twin — a new row in the §4.3 table plus one paragraph. This is the specific rebuttal to "the only from-scratch ternary result is a 7M toy." Requires a rented 24–40GB GPU (does not fit the local 8GB card). See [../thesis/THESIS.md](../thesis/THESIS.md) §5.2.
 
 ## What this paper deliberately does NOT claim
 
-Scale transfer beyond 130M/7M, absolute dLLM quality parity, any deployment/latency/VRAM advantage, or a mechanism for the robustness. Those belong to the program document ([../PHD-THESIS.md](../PHD-THESIS.md)), not this paper.
+Scale transfer beyond 130M/7M, absolute dLLM quality parity, any deployment/latency/VRAM advantage, or a mechanism for the robustness. Those belong to the program document ([../thesis/THESIS.md](../thesis/THESIS.md)), not this paper.

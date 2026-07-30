@@ -7,7 +7,7 @@ pre-registered thresholds ([timestamped](https://github.com/wfzyx/diffusal/relea
 
 ## Results so far
 
-The publishable finding, with caveats and limitations: [ARXIV-PAPER.md](ARXIV-PAPER.md).
+The publishable finding, with caveats and limitations: [technical whitepaper (PDF)](whitepaper/diffusal-whitepaper.pdf).
 
 ### Exp 0 — post-training quantization
 
@@ -73,7 +73,7 @@ matched native revisable model under one frozen corruption/sampler pair.
 
 Measurement-then-build, defined in the
 [whitepaper](whitepaper/diffusal-whitepaper.pdf) ([LaTeX](whitepaper/diffusal-whitepaper.tex))
-and [PHD-THESIS.md](PHD-THESIS.md):
+and [the thesis program](thesis/THESIS.md):
 
 1. **Exp 0 (done):** PTQ degradation with matched AR controls — the *excess*
    is the only admissible evidence about diffusion.

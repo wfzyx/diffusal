@@ -11,7 +11,7 @@
 meta:
   experiment: exp0
   paper: whitepaper/diffusal-whitepaper.pdf
-  registered_by: Victor Panisa <victor.panisa@gmail.com>
+  registered_by: Victor Hugo Panisa Bezerra <victor.panisa@gmail.com>
 
 platform:
   dllm:

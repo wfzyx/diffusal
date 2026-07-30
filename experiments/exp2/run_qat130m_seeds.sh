@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Exp 2 — 130M native ternary QAT cohort (12 runs: 3 seeds x {ar,dllm} x {fp16,ternary}).
 # Mirrors run_replication_seeds.sh but drives bd3lms model=small via hydra overrides.
-# Designed to run ON THE GCP L4 VM (see infra/gcp/). Idempotent: re-running skips
+# Designed to run on a 24–40GB CUDA GPU. Idempotent: re-running skips
 # cells already marked done, so it survives spot preemption.
 #
 # Requires: configs/exp2-qat130m.yaml committed+tagged first (pre-registration),

@@ -9,7 +9,7 @@
 meta:
   experiment: exp2-pilot
   paper: whitepaper/diffusal-whitepaper.pdf
-  registered_by: Victor Panisa <victor.panisa@gmail.com>
+  registered_by: Victor Hugo Panisa Bezerra <victor.panisa@gmail.com>
 
 design:
   runs:                      # 2x2, identical everything except the two factors
