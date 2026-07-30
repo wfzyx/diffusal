@@ -117,5 +117,9 @@ per [mdlm#22](https://github.com/kuleshov-group/mdlm/issues/22)).
 
 ## Citation and license
 
-See [CITATION.cff](CITATION.cff) for citation metadata. This repository and its
-research materials are licensed under [CC BY 4.0](LICENSE).
+See [CITATION.cff](CITATION.cff) for citation metadata.
+
+- Diffusal-authored source code is licensed under the [MIT License](LICENSE).
+- The paper, whitepaper, figures, and other research prose are licensed under
+  [CC BY 4.0](LICENSE-PAPER).
+- `third_party/` remains under its own upstream licenses.
