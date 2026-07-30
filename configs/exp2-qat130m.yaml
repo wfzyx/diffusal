@@ -7,12 +7,12 @@
 # Exp 0 PTQ result, so PTQ and QAT sit at one matched scale.
 #
 # Purpose: rebut "the only from-scratch ternary result is a 7M toy" before the
-# HN/Reddit push (see NEXT-STEPS.md). Adds one row to ARXIV-PAPER.md §4.3.
+# HN/Reddit push. Adds one row to arxiv/diffusal-arxiv.tex §4.3.
 
 meta:
   experiment: exp2-qat130m
   parent: exp2-replication
-  paper: ARXIV-PAPER.md            # §4.3; and whitepaper/diffusal-whitepaper.tex §Exp2
+  paper: arxiv/diffusal-arxiv.tex  # §4.3; and whitepaper/diffusal-whitepaper.tex §Exp2
   status: frozen-on-commit
 
 cohort:

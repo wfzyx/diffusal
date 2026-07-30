@@ -1,6 +1,6 @@
 # Diffusal — Building a Natively Ternary Text Diffusion Model in the Gemma Family
 
-**Program document (the "monster").** This is the full de-risking program whose end goal is a **1.58-bit (ternary) masked diffusion language model in the Gemma family** — concretely, an A2D (autoregressive-to-diffusion) conversion of **Gemma 4 E2B** trained with ternary QAT distilled from its FP16 parent. The scoped empirical finding that motivates the program (dLLMs are more robust to extreme weight quantization than matched AR models) is written up separately and independently in [ARXIV-PAPER.md](ARXIV-PAPER.md); that paper stands on its own and does not depend on anything below. This document is everything the paper is *not*: the build, the scale ladder, the systems and memory reality, the fragility map, and the kill gates.
+**Program document (the "monster").** This is the full de-risking program whose end goal is a **1.58-bit (ternary) masked diffusion language model in the Gemma family** — concretely, an A2D (autoregressive-to-diffusion) conversion of **Gemma 4 E2B** trained with ternary QAT distilled from its FP16 parent. The scoped empirical finding that motivates the program (dLLMs are more robust to extreme weight quantization than matched AR models) is written up separately and independently in the [arXiv manuscript](../arxiv/diffusal-arxiv.tex); that paper stands on its own and does not depend on anything below. This document is everything the paper is *not*: the build, the scale ladder, the systems and memory reality, the fragility map, and the kill gates.
 
 **Separation of concerns (read this first).** The *paper* has one bar: is one measurement clean, matched, replicated, honestly scoped? It already clears that bar. The *program* has a different, receding bar — scale transfer, deployment economics, mechanism — and it is *supposed* to keep receding, because it is a multi-rung ladder. Do not grade the paper against the program's rubric; that is the goalpost treadmill. Publish the paper; run the program.
 
@@ -8,7 +8,7 @@
 
 ## 0. Status and the two-track plan
 
-**Track A — publish (done evidence, no new compute).** Ship [ARXIV-PAPER.md](ARXIV-PAPER.md) on the 130M INT4 PTQ spine now. Gate the adversarial-venue push (Reddit/HN) on the 130M QAT twin (§5.2), because that is the specific patch for the paper's soft underbelly (the 7M QAT rung).
+**Track A — publish (done evidence, no new compute).** Ship the [arXiv manuscript](../arxiv/diffusal-arxiv.tex) on the 130M INT4 PTQ spine now. Gate the adversarial-venue push (Reddit/HN) on the 130M QAT twin (§5.2), because that is the specific patch for the paper's soft underbelly (the 7M QAT rung).
 
 **Track B — build (the program).** Climb the scale ladder toward Gemma 4 E2B ternary QAT, killing at any gate in §10.
 
@@ -43,7 +43,7 @@ Objective: PTQ degradation of a small dLLM *relative to a matched AR control*, p
 
 **Platform, chosen to make matched-control + remasking free:** MDLM-owt (~130M) with the same release's AR baseline (`ar.ckpt`) as the confound-free control; ReMDM as the genuine-remasking condition and the vanilla MDLM confidence sampler as commit-and-freeze, on the same weights. Second scale point available via Tiny-A2D 0.5B (dLLM/ZHZisZZ conversion recipe, each checkpoint has a *literal AR parent*). DiffusionGemma-26B-A4B is a **measurement-only** context model (MoE, out of QAT budget), not a QAT target.
 
-**Result:** at INT4 the dLLM degrades ~2× less than its AR twin (excess −11 to −16pp likelihood, −50.8pp generative), unanimous across three datasets. Ternary PTQ collapses on both (uninformative, pre-registered). Full write-up feeds [ARXIV-PAPER.md](ARXIV-PAPER.md) §4.1–4.2.
+**Result:** at INT4 the dLLM degrades ~2× less than its AR twin (excess −11 to −16pp likelihood, −50.8pp generative), unanimous across three datasets. Ternary PTQ collapses on both (uninformative, pre-registered). Full write-up feeds the [arXiv manuscript](../arxiv/diffusal-arxiv.tex) §4.1–4.2.
 
 ## 4. Experiment 1 — error-trajectory dynamics (partially done, exploratory)
 
@@ -59,7 +59,7 @@ Objective: how quantization error evolves under iterative refinement — the per
 
 **Metrics and interpretation.** All trajectory metrics are reported as a function of **mask fraction / noise level** (not raw step index, which is sampler-dependent) and as **per-sample distributions**, not only means: token agreement vs FP16 (A, B) or vs the unperturbed run (C); Hamming-distance decay after injection (C — the contractivity estimate); oscillation rate (remasking sampler only, n/a for commit-and-freeze). KL by noise level is *supporting only* — over a large vocab it is tail-dominated and temperature-sensitive, near-degenerate around the mask token. **Quality anchor, required alongside every divergence metric:** divergence measures *fidelity* to FP16, not quality — a diverged completion can be equally good. So every condition also reports oracle perplexity (fixed larger model) and final task score. **A divergence finding with no quality drop is a fidelity result, not a failure**, and is labeled as such. What we read off: (a) the **crossover** mask fraction where Protocol C turns expansive and Protocol A distortion becomes large, reported per-sample — if bimodal (early-fork vs smooth-drift), that *is* the finding, do not average it away; (b) **early-fork vs late-drift** — free-running divergence dominated by a few early commit disagreements implies a schedule/threshold fix (§6.1), smooth late-stage drift corroborated by Protocol C expansion implies genuine precision sensitivity near convergence; (c) **mitigation cost, priced honestly** — the implied fix (higher precision below the crossover) needs a resident higher-precision weight copy or on-the-fly dequant, charged against §8; a crossover at 40% mask fraction with a resident FP16 copy is not a ternary model. Thresholds for "grows / bounded / contracts" are pre-registered before runs.
 
-**Completed exploratory probes (mechanism negatives).** Commit-and-freeze, 96 trajectories: eight fixed-token changes propagate to ~66% of downstream positions (FP16 65.7% vs ternary 66.3%, three-seed interval [−2.2, +3.3]pp — no resolved precision effect). Post-hoc revisable retrofit: ~98%. These **reject** the broad premise that commitment alone erases fixed-token errors, and show no FP16-vs-ternary propagation difference. They are exploratory (not pre-registered) and feed [ARXIV-PAPER.md](ARXIV-PAPER.md) §4.4.
+**Completed exploratory probes (mechanism negatives).** Commit-and-freeze, 96 trajectories: eight fixed-token changes propagate to ~66% of downstream positions (FP16 65.7% vs ternary 66.3%, three-seed interval [−2.2, +3.3]pp — no resolved precision effect). Post-hoc revisable retrofit: ~98%. These **reject** the broad premise that commitment alone erases fixed-token errors, and show no FP16-vs-ternary propagation difference. They are exploratory (not pre-registered) and feed the [arXiv manuscript](../arxiv/diffusal-arxiv.tex) §4.4.
 
 **Next Exp 1 step:** train and evaluate a *matched native revisable* model with one frozen corruption and one inference sampler — the only clean way to ask whether trained revision reduces fixed-token sensitivity without sacrificing quality. Quality gate: lower disagreement is meaningless if validation loss or completion behavior worsens; report propagation, validation loss, and completion together. Only an actual DiffusionGemma run may be labeled "DiffusionGemma."
 
@@ -81,7 +81,7 @@ Shipping artifact: an **A2D conversion of Gemma 4 E2B (~2.3B effective params) t
 
 ### 5.2 The 130M QAT bridge (next experiment)
 
-**Done at 7M** (feeds [ARXIV-PAPER.md](ARXIV-PAPER.md) §4.3): three-seed R = 0.890, CI [0.872, 0.908]; no extra dLLM tax, but confounded three ways (sub-3B scale, 21.5% ternarization coverage, NELBO bound).
+**Done at 7M** (feeds the [arXiv manuscript](../arxiv/diffusal-arxiv.tex) §4.3): three-seed R = 0.890, CI [0.872, 0.908]; no extra dLLM tax, but confounded three ways (sub-3B scale, 21.5% ternarization coverage, NELBO bound).
 
 **130M is the next rung and the paper's insurance.** Its value is *scale symmetry*: you already have the strong PTQ result at 130M (Exp 0); a 130M QAT cohort gives PTQ *and* QAT at the same scale and removes the "only 7M / partial coverage" attack surface before the adversarial-venue push. Cohort: {AR, dLLM} × {FP16, ternary-QAT} × 3 seeds = 12 runs. Requires a rented 24–40GB GPU (does not fit the owned 8GB card). **Frame it as closing the PTQ/QAT scale gap, not as a publication gate** — the arXiv v1 ships without it.
 
