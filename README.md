@@ -9,17 +9,21 @@ pre-registered thresholds ([timestamped](https://github.com/wfzyx/diffusal/relea
 
 The publishable finding, with caveats and limitations: [ARXIV-PAPER.md](ARXIV-PAPER.md).
 
-![AR vs dLLM under extreme quantization — INT8/INT4 likelihood, generative anchor, and native ternary QAT gap-of-gaps](assets/bench-ar-vs-dllm.png)
+### Exp 0 — post-training quantization
 
+MDLM-owt 130M dLLM versus its matched AR baseline. Values are relative to each
+model's own FP16 perplexity; negative excess means less dLLM degradation.
 
-**Exp 0 — post-training quantization, likelihood** (dLLM: MDLM-owt 130M vs its
-matched AR baseline; damage relative to each model's own FP16):
-
-| precision | AR degradation | dLLM degradation | excess (dLLM − AR) |
-|---|---:|---:|---:|
-| INT8 | ~0% | +0.3–0.6% | ≤ +0.7 pp |
-| INT4 | +25–32% | +9–21% | **−11 to −16 pp** |
-| ternary | ~10⁴× fp16 | ~10¹²× fp16 | uninformative (pre-registered) |
+| evaluation | precision | AR degradation | dLLM degradation | excess (dLLM − AR) |
+|---|---|---:|---:|---:|
+| PTB likelihood | INT8 | −0.03% | +0.62% | +0.65 pp |
+| Wikitext103 likelihood | INT8 | +0.21% | +0.56% | +0.35 pp |
+| LAMBADA likelihood | INT8 | −0.03% | +0.27% | +0.30 pp |
+| PTB likelihood | INT4 | +31.81% | +20.85% | **−10.97 pp** |
+| Wikitext103 likelihood (primary) | INT4 | +26.84% | +11.59% | **−15.25 pp** |
+| LAMBADA likelihood | INT4 | +24.77% | +9.02% | **−15.74 pp** |
+| GPT-2-large generative anchor | INT4 | +96.2% | +45.4% | **−50.8 pp** |
+| Likelihood | ternary | ~10⁴× FP16 | ~10¹²× FP16 | uninformative (pre-registered) |
 
 → Pre-registered **`dllm_more_robust`** verdict fired: the diffusion model
 absorbs INT4 weight noise roughly **2× better** than its AR twin, unanimous
