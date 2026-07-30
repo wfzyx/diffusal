@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use Diffusal, please cite this repository."
+title: "Diffusal: Error dynamics of ternary quantization in masked diffusion language models"
+authors:
+  - family-names: "Hugo"
+    given-names: "Victor"
+version: "1.0.0"
+date-released: 2026-07-24
+repository-code: "https://github.com/wfzyx/diffusal"
+url: "https://github.com/wfzyx/diffusal"
+license: "CC-BY-4.0"
+type: software
