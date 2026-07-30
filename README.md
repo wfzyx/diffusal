@@ -114,3 +114,8 @@ per [mdlm#22](https://github.com/kuleshov-group/mdlm/issues/22)).
 - Ternary PTQ fails on every architecture (BitNet's premise) — only *native*
   ternary training is informative, and no dLLM QAT existed in the literature
   as of 2026-07 (verified sweep in whitepaper §2).
+
+## Citation and license
+
+See [CITATION.cff](CITATION.cff) for citation metadata. This repository and its
+research materials are licensed under [CC BY 4.0](LICENSE).
