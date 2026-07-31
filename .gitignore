@@ -17,3 +17,14 @@ __pycache__/
 
 # arXiv build output
 arxiv/*.pdf
+
+# Private root-level notes
+/ARXIV-PAPER.md
+/CONTACTS.md
+/GTM.md
+/NEXT-STEPS.md
+/PHD-THESIS.md
+/REVIEWER.md
+/REVIEWER-2.md
+/SCALE-AND-COMPUTE-PLAN.md
+/SUGGESTIONS.md
