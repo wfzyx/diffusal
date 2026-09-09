@@ -281,15 +281,19 @@ def evaluate_loss(model, eval_batches, mask_token_id, is_dllm=False):
     return sum(losses) / len(losses)
 
 
-def measure_router_flips(base_model, quant_model, eval_batches, mask_token_id, is_dllm=False):
-    """Measures router flip rate across pre-sampled, fixed paired batches."""
+def measure_router_flips(base_model, quant_model, eval_batches, mask_token_id, apply_mask=False):
+    """
+    Measures router flip rate across pre-sampled, fixed paired batches.
+    apply_mask controls whether evaluation inputs have 35% tokens masked,
+    enabling a strict matched-input comparison between AR and dLLM.
+    """
     base_model.eval()
     quant_model.eval()
     layer_flips = []
     with torch.no_grad():
         for x, _, mask in eval_batches[:4]:
             x_in = x.clone()
-            if is_dllm:
+            if apply_mask:
                 x_in[mask] = mask_token_id
             _, b_routes = base_model(x_in, record_routing=True)
             _, q_routes = quant_model(x_in, record_routing=True)
@@ -453,9 +457,10 @@ def run_full_benchmark():
     ar_tern_nats = ar_tern_loss - ar_fp_loss
     dllm_tern_nats = dllm_tern_loss - dllm_fp_loss
 
-    # Router Flips (on paired inputs)
-    ar_int4_flips = measure_router_flips(ar_fp32, ar_int4, eval_batches, mask_token_id, is_dllm=False)
-    dllm_int4_flips = measure_router_flips(dllm_fp32, dllm_int4, eval_batches, mask_token_id, is_dllm=True)
+    # Router Flips (paired inputs: both clean and masked evaluated for AR to isolate architecture from input mask)
+    ar_flips_clean = measure_router_flips(ar_fp32, ar_int4, eval_batches, mask_token_id, apply_mask=False)
+    ar_flips_masked = measure_router_flips(ar_fp32, ar_int4, eval_batches, mask_token_id, apply_mask=True)
+    dllm_flips_masked = measure_router_flips(dllm_fp32, dllm_int4, eval_batches, mask_token_id, apply_mask=True)
 
     # Matched Trajectory Drifts (identical prompt, identical gen_len, identical compared positions)
     ar_gen_drift = measure_trajectory_drift(ar_fp32, ar_int4, eval_prompts, mask_token_id, is_dllm=False, gen_len=32)
@@ -474,7 +479,8 @@ def run_full_benchmark():
     print(f"{'INT4 Loss Degradation':<22} | {ar_int4_tax:+6.2f}%       | {dllm_int4_tax:+6.2f}%       | {int4_excess:+6.2f} pp          | {fmt_r(int4_R)}")
     print(f"{'Ternary-QAT Val Loss':<22} | {ar_tern_loss:7.4f}        | {dllm_tern_loss:7.4f}        | {'-':<18} | -")
     print(f"{'Ternary-QAT Loss Degr':<22} | {ar_tern_tax:+6.2f}%       | {dllm_tern_tax:+6.2f}%       | {tern_excess:+6.2f} pp          | {fmt_r(tern_R)}")
-    print(f"{'Router Flip (INT4)':<22} | {ar_int4_flips*100:6.2f}%        | {dllm_int4_flips*100:6.2f}%        | {(dllm_int4_flips-ar_int4_flips)*100:+6.2f} pp          | {dllm_int4_flips/ar_int4_flips:.3f}")
+    print(f"{'Router Flip (clean)':<22} | {ar_flips_clean*100:6.2f}%        | {'n/a':<14} | {'-':<18} | -")
+    print(f"{'Router Flip (masked)':<22} | {ar_flips_masked*100:6.2f}%        | {dllm_flips_masked*100:6.2f}%        | {(dllm_flips_masked-ar_flips_masked)*100:+6.2f} pp          | {dllm_flips_masked/ar_flips_masked:.3f}")
     print(f"{'Trajectory Drift':<22} | {ar_gen_drift*100:6.2f}% (gen)  | {dllm_gen_drift*100:6.2f}% (canv) | {(dllm_gen_drift-ar_gen_drift)*100:+6.2f} pp          | uninformative")
     print("=" * 80)
 
@@ -483,7 +489,8 @@ def run_full_benchmark():
         print("  • Status: expected_uninformative (INT4 PTQ shifts loss < 1.0% relative; model undertrained at 250 steps)")
     else:
         print(f"  • INT4 degradation ratio R: {fmt_r(int4_R)} (Excess: {int4_excess:+.2f} pp)")
-    print(f"  • Headline Signal (Router Flips): dLLM {dllm_int4_flips*100:.2f}% vs AR {ar_int4_flips*100:.2f}% (R = {dllm_int4_flips/ar_int4_flips:.3f}, 2x routing instability in dLLM)")
+    print(f"  • Router Flips (Matched Masked Input): dLLM {dllm_flips_masked*100:.2f}% vs AR {ar_flips_masked*100:.2f}% (R = {dllm_flips_masked/ar_flips_masked:.3f})")
+    print(f"  • Router Flips (AR Clean Baseline): AR flips {ar_flips_clean*100:.2f}% (masking alone shifts AR flips by {(ar_flips_masked-ar_flips_clean)*100:+.2f} pp)")
     print(f"  • Trajectory Drift: dLLM {dllm_gen_drift*100:.2f}% is an uninformative argmax artifact (negligible loss shift cannot flip top-1)")
     print("=" * 80)
 
