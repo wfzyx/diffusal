@@ -54,7 +54,10 @@ def audit_cohort(name, checkpoints, fallback_counts=None):
         print(f"[{name}] No checkpoints found.")
         return
 
-    print(f"=== {name} Quantization Coverage ===")
+        if not existing:
+        print(f"=== {name} Quantization Coverage (estimated — no checkpoint found) ===")
+    else:
+        print(f"=== {name} Quantization Coverage ===")
     print(f"Total model parameters:           {total:,}")
     print(f"Ternary-QAT linear weights:       {ternary:,} ({ternary / total:.1%})")
     print(f"FP16 weight storage:              {fp16_bytes / 2**20:.2f} MiB")

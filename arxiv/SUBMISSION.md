@@ -46,7 +46,7 @@ Confirm the PDF renders both tables and the abstract with no overfull-box disast
 - [ ] Every number in the tables matches `experiments/exp0/RESULTS.md` and `experiments/exp2/RESULTS-replication.md`.
 - [ ] Pre-registration release tags exist and are public: `prereg-exp0-2026-07-16`, `prereg-exp2-pilot-2026-07-16.1`.
 - [ ] The reproducibility release (configs, checkpoint SHA-256, shim) is pushed and linked, or a URL placeholder is replaced before upload.
-- [x] Limitations section lists both QAT coverage figures (21.5% dLLM, 19.6% AR), sub-3B scale, and NELBO bound.
+- [x] Limitations section lists both QAT coverage figures (21.5% dLLM, 19.6% AR, verified from structural decomposition; checkpoints not stored in repo clone), sub-3B scale, and NELBO bound.
 - [ ] Author name / email / affiliation correct.
 
 ## Version plan
