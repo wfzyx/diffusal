@@ -1,5 +1,5 @@
 """
-Full Matched AR-MoE vs dLLM-MoE Training & Quantization Benchmark
+Matched AR-MoE vs dLLM-MoE Training & Quantization Benchmark (Corrected Protocol)
 =================================================================
 Trains matched AR and dLLM Top-2 MoE models on real text data across:
   {AR-MoE, dLLM-MoE} x {FP32/FP16, INT4-PTQ, Ternary-QAT}
@@ -234,8 +234,11 @@ def train_model(model, train_tokens, mask_token_id, steps=250, is_dllm=False, lr
             x_masked[mask] = mask_token_id
             
             logits = model(x_masked)
-            # Loss computed on masked tokens (or entire canvas)
-            loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), x_batch.reshape(-1))
+            # Standard discrete diffusion / MLM objective: loss evaluated strictly on masked positions
+            if mask.sum() > 0:
+                loss = F.cross_entropy(logits[mask], x_batch[mask])
+            else:
+                loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), x_batch.reshape(-1))
             
         optimizer.zero_grad()
         loss.backward()
@@ -252,90 +255,100 @@ def train_model(model, train_tokens, mask_token_id, steps=250, is_dllm=False, lr
 # 5. Full Evaluation Benchmark
 # -----------------------------------------------------------------------------
 
-def evaluate_loss(model, val_tokens, mask_token_id, is_dllm=False, num_batches=10):
+def evaluate_loss(model, eval_batches, mask_token_id, is_dllm=False):
+    """Evaluates loss across pre-sampled, fixed paired batches."""
     model.eval()
     losses = []
     with torch.no_grad():
-        for _ in range(num_batches):
-            x, y = get_batch(val_tokens, batch_size=16, seq_len=64)
+        for x, y, mask in eval_batches:
             if not is_dllm:
                 logits = model(x)
                 loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1)).item()
             else:
-                # 35% standard canvas evaluation mask
-                mask = torch.rand_like(x, dtype=torch.float) < 0.35
                 x_m = x.clone()
                 x_m[mask] = mask_token_id
                 logits = model(x_m)
-                loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), x.reshape(-1)).item()
+                # Evaluated strictly on masked positions (no identity copy cheat)
+                if mask.sum() > 0:
+                    loss = F.cross_entropy(logits[mask], x[mask]).item()
+                else:
+                    loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), x.reshape(-1)).item()
             losses.append(loss)
     return sum(losses) / len(losses)
 
 
-def measure_router_flips(base_model, quant_model, val_tokens, mask_token_id, is_dllm=False):
+def measure_router_flips(base_model, quant_model, eval_batches, mask_token_id, is_dllm=False):
+    """Measures router flip rate across pre-sampled, fixed paired batches."""
     base_model.eval()
     quant_model.eval()
-    x, _ = get_batch(val_tokens, batch_size=16, seq_len=64)
-    if is_dllm:
-        mask = torch.rand_like(x, dtype=torch.float) < 0.35
-        x[mask] = mask_token_id
-        
-    with torch.no_grad():
-        _, base_routing = base_model(x, record_routing=True)
-        _, quant_routing = quant_model(x, record_routing=True)
-        
     layer_flips = []
-    for l in range(len(base_routing)):
-        _, b_idx = base_routing[l]
-        _, q_idx = quant_routing[l]
-        
-        mismatches = 0
-        total = b_idx.shape[0] * b_idx.shape[1]
-        for b in range(b_idx.shape[0]):
-            for t in range(b_idx.shape[1]):
-                if set(b_idx[b, t].tolist()) != set(q_idx[b, t].tolist()):
-                    mismatches += 1
-        layer_flips.append(mismatches / total)
+    with torch.no_grad():
+        for x, _, mask in eval_batches[:4]:
+            x_in = x.clone()
+            if is_dllm:
+                x_in[mask] = mask_token_id
+            _, b_routes = base_model(x_in, record_routing=True)
+            _, q_routes = quant_model(x_in, record_routing=True)
+            
+            for b_idx, q_idx in zip(b_routes, q_routes):
+                mismatches = 0
+                total = b_idx.shape[0] * b_idx.shape[1]
+                for b in range(b_idx.shape[0]):
+                    for t in range(b_idx.shape[1]):
+                        if set(b_idx[b, t].tolist()) != set(q_idx[b, t].tolist()):
+                            mismatches += 1
+                layer_flips.append(mismatches / total)
     return sum(layer_flips) / len(layer_flips)
 
 
-def measure_trajectory_drift(fp_model, quant_model, val_tokens, mask_token_id, is_dllm=False):
+def measure_trajectory_drift(fp_model, quant_model, eval_prompts, mask_token_id, is_dllm=False, gen_len=32, steps=8):
+    """
+    Matched trajectory drift measurement:
+    Both decoders share the exact same prompt, generate the exact same number of tokens,
+    and compare against their own unquantized baseline on the exact same positions.
+    """
     fp_model.eval()
     quant_model.eval()
-    x, _ = get_batch(val_tokens, batch_size=4, seq_len=32)
+    B, prompt_len = eval_prompts.shape
     
     if not is_dllm:
-        # AR sequential generation drift
-        prompt = x[:, :8]
         def gen_ar(m):
-            cur = prompt.clone()
-            for _ in range(16):
+            cur = eval_prompts.clone()
+            for _ in range(gen_len):
                 logits = m(cur)
                 next_tok = logits[:, -1, :].argmax(dim=-1, keepdim=True)
                 cur = torch.cat([cur, next_tok], dim=1)
-            return cur[:, 8:]
+            return cur[:, prompt_len:]
         out_fp = gen_ar(fp_model)
         out_q = gen_ar(quant_model)
         return (out_fp != out_q).float().mean().item()
     else:
-        # dLLM canvas iterative refinement drift
-        seq_len = 32
-        steps = 8
-        tokens_per_step = seq_len // steps
         def gen_dllm(m):
-            canvas = torch.full((4, seq_len), mask_token_id, dtype=torch.long)
-            for _ in range(steps):
+            canvas = torch.full((B, prompt_len + gen_len), mask_token_id, dtype=torch.long, device=eval_prompts.device)
+            canvas[:, :prompt_len] = eval_prompts
+            
+            # Progressively unmask generated positions only
+            for s in range(steps):
                 logits = m(canvas)
-                probs = F.softmax(logits, dim=-1)
+                probs = F.softmax(logits[:, prompt_len:, :], dim=-1)
                 conf, pred = probs.max(dim=-1)
-                masked = (canvas == mask_token_id)
+                
+                masked = (canvas[:, prompt_len:] == mask_token_id)
                 conf[~masked] = -1e9
-                for b in range(4):
-                    n_unmask = min(tokens_per_step, int(masked[b].sum().item()))
+                
+                for b in range(B):
+                    unmasked_count = int((~masked[b]).sum().item())
+                    rem_steps = steps - s
+                    n_unmask = math.ceil((gen_len - unmasked_count) / rem_steps)
+                    n_unmask = min(n_unmask, int(masked[b].sum().item()))
                     if n_unmask > 0:
                         _, idx = torch.topk(conf[b], n_unmask)
-                        canvas[b, idx] = pred[b, idx]
-            return canvas
+                        canvas[b, prompt_len + idx] = pred[b, idx]
+                        
+            # Assert no token remains unmasked
+            assert (canvas[:, prompt_len:] == mask_token_id).sum() == 0, "All positions must be unmasked!"
+            return canvas[:, prompt_len:]
+            
         canvas_fp = gen_dllm(fp_model)
         canvas_q = gen_dllm(quant_model)
         return (canvas_fp != canvas_q).float().mean().item()
@@ -421,6 +434,80 @@ def run_full_benchmark():
     dllm_gen_drift = measure_trajectory_drift(dllm_fp32, dllm_int4, val_tokens, mask_token_id, is_dllm=True)
 
     print("\n" + "=" * 80)
+    print("                    FINAL TRAINED EXPERIMENTAL BENCHMARK")
+    print("=" * 80)
+    print(f"{'Condition':<22} | {'AR-MoE':<14} | {'dLLM-MoE':<14} | {'Excess (dLLM - AR)':<18} | {'Gap Ratio R'}")
+    print("-" * 80)
+    print(f"{'FP32 Val Loss':<22} | {ar_fp_loss:7.4f}        | {dllm_fp_loss:7.4f}        | {'-':<18} | -")
+    print(f"{'INT4 Val Loss':<22} | {ar_int4_loss:7.4f}        | {dllm_int4_loss:7.4f}        | {'-':<18} | -")
+    print(f"{'INT4 Loss Degradation':<22} | {ar_int4_tax:+6.2f}%       | {dllm_int4_tax:+6.2f}%       | {int4_excess:+6.2f} pp          | {int4_R:.3f}")
+    print(f"{'Ternary-QAT Val Loss':<22} | {ar_tern_loss:7.4f}        | {dllm_tern_loss:7.4f}        | {'-':<18} | -")
+    print(f"{'Ternary-QAT Loss Degr':<22} | {ar_tern_tax:+6.2f}%       | {dllm_tern_tax:+6.2f}%       | {tern_excess:+6.2f} pp          | {tern_R:.3f}")
+    print(f"{'Router Flip (INT4)':<22} | {ar_int4_flips*100:6.2f}%        | {dllm_int4_flips*100:6.2f}%        | {(dllm_int4_flips-ar_int4_flips)*100:+6.2f} pp          | {dllm_int4_flips/ar_int4_flips:.3f}")
+    print(f"{'Trajectory Drift':<22} | {ar_gen_drift*100:6.2f}% (gen)  | {dllm_gen_drift*100:6.2f}% (canv) | {(dllm_gen_drift-ar_gen_drift)*100:+6.2f} pp          | {dllm_gen_drift/ar_gen_drift:.3f}")
+    print("=" * 80)
+
+    print("\nHypothesis Verdict:")
+    print(f"  • Pre-registered 'no-extra-tax' (R <= 1.25): {'PASSED' if (int4_R <= 1.25 and tern_R <= 1.25) else 'FAILED'}")
+    print(f"  • Strict 'dllm_more_robust' (R < 0.80): {'FIRED' if int4_R < 0.80 else 'NOT FIRED'}")
+    print(f"  • End-to-End Trajectory Resilience: AR {ar_gen_drift*100:.1f}% drift vs dLLM {dllm_gen_drift*100:.1f}% drift (Ratio: {dllm_gen_drift/ar_gen_drift:.3f})")
+    print("=" * 80)
+
+
+if __name__ == '__main__':
+    run_full_benchmark()# Create fixed, paired evaluation batches
+    print("\nPreparing fixed, paired validation batches...")
+    torch.manual_seed(999)
+    eval_batches = []
+    for _ in range(12):
+        x, y = get_batch(val_tokens, batch_size=16, seq_len=64)
+        mask = torch.rand_like(x, dtype=torch.float) < 0.35
+        eval_batches.append((x, y, mask))
+        
+    eval_prompts, _ = get_batch(val_tokens, batch_size=8, seq_len=16)
+
+    # 2. Evaluate Models
+    print("Evaluating FP32 Models...")
+    ar_fp_loss = evaluate_loss(ar_fp32, eval_batches, mask_token_id, is_dllm=False)
+    dllm_fp_loss = evaluate_loss(dllm_fp32, eval_batches, mask_token_id, is_dllm=True)
+
+    print("Evaluating INT4 Models...")
+    ar_int4_loss = evaluate_loss(ar_int4, eval_batches, mask_token_id, is_dllm=False)
+    dllm_int4_loss = evaluate_loss(dllm_int4, eval_batches, mask_token_id, is_dllm=True)
+
+    print("Evaluating Ternary-QAT Models...")
+    ar_ternary.enable_ternary(True)
+    dllm_ternary.enable_ternary(True)
+
+    ar_tern_loss = evaluate_loss(ar_ternary, eval_batches, mask_token_id, is_dllm=False)
+    dllm_tern_loss = evaluate_loss(dllm_ternary, eval_batches, mask_token_id, is_dllm=True)
+
+    # Taxes (percentage increase)
+    ar_int4_tax = (ar_int4_loss - ar_fp_loss) / ar_fp_loss * 100
+    dllm_int4_tax = (dllm_int4_loss - dllm_fp_loss) / dllm_fp_loss * 100
+    int4_excess = dllm_int4_tax - ar_int4_tax
+    int4_R = (dllm_int4_tax / ar_int4_tax) if abs(ar_int4_tax) > 1e-4 else float('nan')
+
+    ar_tern_tax = (ar_tern_loss - ar_fp_loss) / ar_fp_loss * 100
+    dllm_tern_tax = (dllm_tern_loss - dllm_fp_loss) / dllm_fp_loss * 100
+    tern_excess = dllm_tern_tax - ar_tern_tax
+    tern_R = (dllm_tern_tax / ar_tern_tax) if abs(ar_tern_tax) > 1e-4 else float('nan')
+
+    # Natural scale cross-entropy differences (Delta nats)
+    ar_int4_nats = ar_int4_loss - ar_fp_loss
+    dllm_int4_nats = dllm_int4_loss - dllm_fp_loss
+    
+    ar_tern_nats = ar_tern_loss - ar_fp_loss
+    dllm_tern_nats = dllm_tern_loss - dllm_fp_loss
+
+    # Router Flips (on paired inputs)
+    ar_int4_flips = measure_router_flips(ar_fp32, ar_int4, eval_batches, mask_token_id, is_dllm=False)
+    dllm_int4_flips = measure_router_flips(dllm_fp32, dllm_int4, eval_batches, mask_token_id, is_dllm=True)
+
+    # Matched Trajectory Drifts (identical prompt, identical gen_len, identical compared positions)
+    ar_gen_drift = measure_trajectory_drift(ar_fp32, ar_int4, eval_prompts, mask_token_id, is_dllm=False, gen_len=32)
+    dllm_gen_drift = measure_trajectory_drift(dllm_fp32, dllm_int4, eval_prompts, mask_token_id, is_dllm=True, gen_len=32)
+
     print("                    FINAL TRAINED EXPERIMENTAL BENCHMARK")
     print("=" * 80)
     print(f"{'Condition':<22} | {'AR-MoE':<14} | {'dLLM-MoE':<14} | {'Excess (dLLM - AR)':<18} | {'Gap Ratio R'}")

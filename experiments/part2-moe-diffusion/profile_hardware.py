@@ -157,23 +157,40 @@ class BlockDiffusionMoE(nn.Module):
 # 3. Generation Strategies: Pure AR vs Block-Diffusion
 # -----------------------------------------------------------------------------
 
-def generate_pure_ar(model, prompt_ids, gen_len=64):
-    """Pure Autoregressive: 1 token generated per forward pass (64 weight streams)."""
+def generate_pure_ar(model, prompt_ids, gen_len=64, use_cache=True):
+    """
+    Pure Autoregressive generation: 1 token generated per forward pass (64 passes).
+    When use_cache=True, simulates KV-cached single-token forward passes.
+    """
     curr_ids = prompt_ids.clone()
     forward_passes = 0
     t0 = time.time()
     
     for _ in range(gen_len):
         L = curr_ids.shape[1]
-        causal_mask = torch.triu(torch.full((L, L), float('-inf'), device=curr_ids.device), diagonal=1)
+        # When using KV cache, active attention computation is O(1) new token attending to past L tokens
+        inp = curr_ids if not use_cache else curr_ids[:, -1:]
+        causal_mask = torch.triu(torch.full((L, L), float('-inf'), device=curr_ids.device), diagonal=1) if not use_cache else None
+        
         with torch.no_grad():
-            x = model.token_emb(curr_ids) + model.pos_emb[:, :L, :]
-            for layer in model.layers:
-                norm_x = layer['ln1'](x)
-                attn_out, _ = layer['attn'](norm_x, norm_x, norm_x, attn_mask=causal_mask)
-                x = x + attn_out
-                x = x + layer['moe'](layer['ln2'](x))
-            logits = model.head(model.ln_f(x))
+            if not use_cache:
+                x = model.token_emb(curr_ids) + model.pos_emb[:, :L, :]
+                for layer in model.layers:
+                    norm_x = layer['ln1'](x)
+                    attn_out, _ = layer['attn'](norm_x, norm_x, norm_x, attn_mask=causal_mask)
+                    x = x + attn_out
+                    x = x + layer['moe'](layer['ln2'](x))
+                logits = model.head(model.ln_f(x))
+            else:
+                # Approximate 1-token step with full context embedding
+                x = model.token_emb(inp) + model.pos_emb[:, L-1:L, :]
+                for layer in model.layers:
+                    norm_x = layer['ln1'](x)
+                    attn_out, _ = layer['attn'](norm_x, norm_x, norm_x)
+                    x = x + attn_out
+                    x = x + layer['moe'](layer['ln2'](x))
+                logits = model.head(model.ln_f(x))
+                
             next_tok = logits[:, -1, :].argmax(dim=-1, keepdim=True)
             curr_ids = torch.cat([curr_ids, next_tok], dim=1)
             forward_passes += 1
@@ -265,36 +282,49 @@ def profile_memory_bandwidth():
     prompt = torch.randint(0, vocab_size - 2, (1, 16))
 
     # Profile Across Precision Regimes
+    # Ternary packed at 2 bits = 0.25 bytes/param (per QUANTIZATION-COVERAGE.md)
     regimes = [
         ("FP32 (4.00 bytes/param)", "fp32", 4.0),
         ("INT4 (0.50 bytes/param)", "int4", 0.5),
-        ("Ternary 1.58b (0.20 bytes/param)", "ternary", 0.20),
+        ("Ternary 2-bit (0.25 bytes/param)", "ternary", 0.25),
     ]
 
-    print("\n" + "-" * 82)
-    print(f"{'Precision':<18} | {'Mode':<16} | {'Fwd Passes':<10} | {'DRAM Streamed':<14} | {'Intensity (FLOP/B)':<18}")
-    print("-" * 82)
+    print("\n" + "-" * 88)
+    print(f"{'Precision':<18} | {'Paradigm':<16} | {'Passes':<8} | {'DRAM (MB)':<10} | {'GFLOPs':<8} | {'Intensity (FLOP/B)':<18}")
+    print("-" * 88)
 
     for regime_name, mode, bytes_per_param in regimes:
         model.set_mode(mode)
-        active_weight_bytes = active_params * bytes_per_param
         
-        # 1. Autoregressive Profiling
-        ar_passes = gen_tokens  # 1 pass per token
-        ar_dram_bytes = ar_passes * active_weight_bytes
-        # 2 FLOPs per parameter per token
+        # 1. Autoregressive Profiling (B=1):
+        # 1 token per forward pass -> exactly 2 of 8 experts active per token
+        ar_passes = gen_tokens  # 64 passes
+        ar_bytes_per_pass = active_params * bytes_per_param
+        ar_dram_bytes = ar_passes * ar_bytes_per_pass
         ar_flops = 2 * active_params * gen_tokens
         ar_intensity = ar_flops / ar_dram_bytes if ar_dram_bytes > 0 else 0
         
-        # 2. Block-Diffusion Profiling
-        num_blocks = math.ceil(gen_tokens / block_size)
-        diff_passes = num_blocks * steps_per_block
-        diff_dram_bytes = diff_passes * active_weight_bytes
-        diff_intensity = ar_flops / diff_dram_bytes if diff_dram_bytes > 0 else 0
+        # 2. Block-Diffusion Profiling (B=32):
+        # 32 tokens processed concurrently per pass.
+        # With Top-2 routing across 8 experts, P(expert not touched) = (1 - 2/8)^32 = 0.0001
+        # Therefore, virtually ALL 8 experts are active during a 32-token candidate block pass!
+        diff_expert_coverage = 1.0  # All 8 experts streamed per block pass
+        diff_active_params = total_params  # Full model parameters streamed
+        diff_bytes_per_pass = diff_active_params * bytes_per_param
         
-        print(f"{mode.upper():<18} | {'Autoregressive':<16} | {ar_passes:<10} | {ar_dram_bytes / (1024**2):7.2f} MB     | {ar_intensity:6.2f} FLOPs/B")
-        print(f"{mode.upper():<18} | {'Block-Diffusion':<16} | {diff_passes:<10} | {diff_dram_bytes / (1024**2):7.2f} MB     | {diff_intensity:6.2f} FLOPs/B ({(diff_intensity/ar_intensity):.1f}x jump)")
-        print("-" * 82)
+        num_blocks = math.ceil(gen_tokens / block_size)
+        diff_passes = num_blocks * steps_per_block  # 2 blocks * 6 steps = 12 passes
+        diff_dram_bytes = diff_passes * diff_bytes_per_pass
+        
+        # Real arithmetic work: 12 passes * 32 tokens = 384 token-forwards (6x more compute than AR)
+        diff_flops = 2 * active_params * (diff_passes * block_size)
+        diff_intensity = diff_flops / diff_dram_bytes if diff_dram_bytes > 0 else 0
+        
+        dram_reduction = ar_dram_bytes / diff_dram_bytes
+        
+        print(f"{mode.upper():<18} | {'Autoregressive':<16} | {ar_passes:<8} | {ar_dram_bytes / (1024**2):7.1f} MB | {ar_flops / 1e9:6.2f}   | {ar_intensity:6.2f} FLOPs/B")
+        print(f"{mode.upper():<18} | {'Block-Diffusion':<16} | {diff_passes:<8} | {diff_dram_bytes / (1024**2):7.1f} MB | {diff_flops / 1e9:6.2f}   | {diff_intensity:6.2f} FLOPs/B ({dram_reduction:.2f}x DRAM cut)")
+        print("-" * 88)
 
     # -------------------------------------------------------------------------
     # Empirical Wall-Clock Latency Benchmark on Laptop
@@ -323,8 +353,10 @@ def profile_memory_bandwidth():
     print(f"  • Semi-AR Block-Diffusion Hybrid:")
     print(f"      - Forward passes:        {diff_passes} passes ({64/diff_passes:.1f} tokens / pass)")
     print(f"      - Latency:               {diff_time:.3f} seconds ({diff_tok_per_sec:.2f} tok/s)")
+    net_dram_cut = (ar_passes * active_params) / (diff_passes * total_params)
     print(f"      - Throughput Acceleration: {speedup:.2f}x faster")
-    print(f"      - DRAM Traffic Reduction: {ar_passes / diff_passes:.2f}x less weight streaming")
+    print(f"      - Weight Streaming Passes: {ar_passes / diff_passes:.2f}x fewer passes ({ar_passes} vs {diff_passes})")
+    print(f"      - Net DRAM Traffic Cut:    {net_dram_cut:.2f}x less memory moved")
     print("=" * 82)
 
 if __name__ == '__main__':

@@ -84,33 +84,28 @@ def __(block_slider, conf_slider, precision_selector, prompt_selector):
     b_size = block_slider.value
     tau = conf_slider.value
 
-    # Empirical parameter settings from our 64-sample rigor grid
+    # Empirical parameter settings (corrected physical DRAM model)
     if "FP32" in prec:
         ar_drift = 0.0
         diff_drift = 0.0
         dram_streamed_ar = 1716.1
-        dram_streamed_diff = 321.8
+        dram_streamed_diff = 897.8
         ai_ar = 0.50
-        ai_diff = 2.67
+        ai_diff = 5.73
     elif "INT4" in prec:
-        ar_drift = 24.85
-        diff_drift = 21.58
+        ar_drift = 28.77
+        diff_drift = 28.77
         dram_streamed_ar = 214.5
-        dram_streamed_diff = 40.2
+        dram_streamed_diff = 112.2
         ai_ar = 4.00
-        ai_diff = 21.33
+        ai_diff = 45.88
     else:  # Ternary
-        # Higher divergence in stress prompts
-        if "curvature" in p_text:
-            ar_drift = 75.00
-            diff_drift = 15.62
-        else:
-            ar_drift = 46.09
-            diff_drift = 41.55
-        dram_streamed_ar = 85.8
-        dram_streamed_diff = 16.1
-        ai_ar = 10.00
-        ai_diff = 53.33
+        ar_drift = 46.09
+        diff_drift = 41.55
+        dram_streamed_ar = 107.3
+        dram_streamed_diff = 56.1
+        ai_ar = 8.00
+        ai_diff = 91.75
 
     excess_drift = diff_drift - ar_drift
     gap_ratio = diff_drift / max(ar_drift, 1e-5)
@@ -148,10 +143,9 @@ def __(
         ### Benchmark Results: {prec}
         | Metric | Autoregressive (AR) | Block-Diffusion (dLLM) | Delta / Advantage |
         | :--- | :--- | :--- | :--- |
-        | **Trajectory Drift Rate** | **{ar_drift:.2f}%** | **{diff_drift:.2f}%** | **{excess_drift:+.2f} pp** ({'dLLM Absorbs Noise Better' if excess_drift <= 0 else 'AR Better'}) |
-        | **DRAM Memory Streamed** | {dram_streamed_ar:.1f} MB | **{dram_streamed_diff:.1f} MB** | **{dram_streamed_ar / dram_streamed_diff:.1f}x Data Reduction** |
-        | **Arithmetic Intensity** | {ai_ar:.2f} FLOPs/B | **{ai_diff:.2f} FLOPs/B** | **{ai_diff / ai_ar:.1f}x Higher Intensity** |
-        | **MoE Gap Ratio $R$** | 1.000 | **{gap_ratio:.3f}** | {'Passes dllm_more_robust (R < 0.80)' if gap_ratio < 0.80 else 'Passes no-extra-tax (R <= 1.25)'} |
+        | **Trajectory Drift Rate** | **{ar_drift:.2f}%** | **{diff_drift:.2f}%** | **{excess_drift:+.2f} pp** |
+        | **DRAM Weight Traffic** | {dram_streamed_ar:.1f} MB | **{dram_streamed_diff:.1f} MB** | **{dram_streamed_ar / dram_streamed_diff:.2f}x Bandwidth Reduction** |
+        | **Arithmetic Intensity** | {ai_ar:.2f} FLOPs/B | **{ai_diff:.2f} FLOPs/B** | **{ai_diff / ai_ar:.1f}x Higher Intensity (6x compute trade-off)** |
         """
     )
     return (summary_table,)

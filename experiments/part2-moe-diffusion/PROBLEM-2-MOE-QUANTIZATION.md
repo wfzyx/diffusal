@@ -27,6 +27,12 @@ $$\| \hat{\text{MoE}}(h_t) - \text{MoE}(h_t) \| \approx \| f_{e_{\text{correct}}
 
 ## Compounding Drift (AR) vs. Canvas Attenuation (dLLM)
 
+
+> **Scope & Architecture Clarification**:
+> The theoretical canvas error attenuation bounds derived below hold strictly for **native discrete diffusion models trained with bidirectional attention from scratch** (as empirically validated on our synthetic 7M matched MoE benchmark). 
+> For pre-trained causal models evaluated under speculative block decoding, attention remains causal, and trajectory stability requires confidence thresholding ($\\tau$) or QAT rather than bidirectional softmax attenuation.
+
+
 ### 1. Autoregressive Compounding Failure
 In an AR model, token $t$ is generated sequentially and stored in the KV cache:
 $$x_t \sim p_\theta(\cdot \mid x_{<t})$$

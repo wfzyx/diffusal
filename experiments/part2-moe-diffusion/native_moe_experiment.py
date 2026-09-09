@@ -1,7 +1,7 @@
 """
 Experiment 2: Native Small MoE Routing & Quantization Profiling
 ===============================================================
-Target Model: PrimeIntellect/qwen3-moe-tiny
+Target Model: PrimeIntellect/qwen3-moe-tiny (Structural Topology Testbed - Untrained Random Weights)
 - 24 layers (Layer 0 dense, Layers 1-23 Qwen3MoeSparseMoeBlock)
 - 16 experts per MoE layer, Top-4 active routing
 - Tests:

@@ -21,6 +21,12 @@ If one simply unmasks the attention matrix of a pre-trained AR model ($A_{ij} = 
 
 ---
 
+
+### Critical Empirical Finding on Zero-Shot Bidirectional Unmasking:
+Our real-world checkpoint experiments on `Qwen2.5-0.5B` demonstrate that **even within an active candidate block of size 16 or 32, pre-trained causal query-key representations and RoPE relative offsets produce complete semantic breakdown under bidirectional unmasking**. 
+
+Therefore, true zero-shot parallel speedup on pre-trained causal checkpoints cannot rely on bidirectional canvas diffusion without retraining; instead, it operates as **Jacobi speculative block decoding** (evaluating candidate tokens under causal attention and iteratively accepting matches based on confidence thresholds $\tau$).
+
 ## Conversion Pathways
 
 ### Pathway 1: Continual Diffusion Pre-training (High Compute)

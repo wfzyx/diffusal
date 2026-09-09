@@ -1,54 +1,44 @@
-# Diffusal Part 2: AR-to-Diffusion Conversion & Extreme MoE Quantization
+# Disperser: Speculative Block Decoding & Sparse MoE Quantization
 
-> **Research Branch**: Expanding *"Masked Diffusion Language Models Absorb Extreme Weight Quantization Better Than Autoregressive Models at Matched Scale"* (Panisa, July 2026).
+> **Research Branch (`disperser`)**: An exploratory investigation into speculative parallel block decoding and native Mixture-of-Experts (MoE) quantization on edge-constrained hardware.
+>
+> *For the primary, peer-reviewed dense discrete diffusion manuscript, see `main` (`arxiv/diffusal-arxiv.tex`).*
+
+---
 
 ## Context & Motivation
 
-The original paper established that discrete masked diffusion models (dLLMs) absorb extreme weight quantization significantly better than matched autoregressive (AR) models (~2x degradation advantage at INT4, zero extra ternary tax under native QAT, $R = 0.890$). However, the original work evaluated **dense transformer backbones only**.
+Autoregressive (AR) sequence generation on edge devices is fundamentally memory-bandwidth bound: each token generated requires streaming multi-gigabyte weight matrices across the memory bus. Sparse Mixture-of-Experts (MoE) architectures and extreme quantization (INT4, Ternary BitNet b1.58) provide theoretical compression, but introduce two critical challenges:
 
-To make this discovery impactful for frontier deployment on bandwidth-constrained hardware (e.g. 16GB commodity RAM or single workstations), we must transition from dense models to **Sparse Mixture-of-Experts (MoE)** architectures.
+1. **The Causal-Speculative Decoding Trade-Off**:
+   Can pre-trained causal architectures execute parallel block decoding without millions of dollars in continual pre-training?
+   * Pre-trained models fail under naive bidirectional unmasking due to RoPE position inversion ($i - j < 0$).
+   * Jacobi parallel speculative decoding preserves causal prefix consistency while evaluating candidate blocks in parallel, trading arithmetic compute for memory bandwidth amortization.
 
-This creates **two distinct, decoupled problems** that must be solved systematically:
-
-```
-                          DIFFUSAL PART 2 RESEARCH SCOPE
-                                        │
-           ┌────────────────────────────┴────────────────────────────┐
-           ▼                                                         ▼
-   [ PROBLEM 1 ]                                             [ PROBLEM 2 ]
-   AR-to-Diffusion Conversion                                Extreme MoE Quantization
-   ──────────────────────────                                ────────────────────────
-   Can we convert pre-trained                                Can we aggressively quantize
-   causal models into diffusion                              (INT4, Ternary b1.58, Bonsai,
-   decoders without multi-million                            DeltaNet) compact production MoEs
-   dollar retraining?                                        without catastrophic collapse?
-           │                                                         │
-   • Causal vs Bidir Conflict                                • Double-Noise Model:
-   • Naive Unmasking Breakdown                                 intra-expert (We) vs router (Wg)
-   • Block-Diffusion Solution                                • Compounding AR Router Drift
-   • Hybrid KV-Cache Architecture                            • dLLM Bidirectional Error Damping
-```
+2. **MoE Quantization Dynamics**:
+   In sparse MoEs, aggressive quantization affects both routing gate layers ($W_g$) and expert parameters ($W_e$). We study router flip sensitivity and trajectory stability under INT4 and ternary representations.
 
 ---
 
-## Folder Structure
+## Key Hardware Findings
 
-* [`PROBLEM-1-AR-TO-DIFFUSION.md`](./PROBLEM-1-AR-TO-DIFFUSION.md): Architectural analysis of causal mask dropping, representation drift, and the Semi-Autoregressive Block-Diffusion Hybrid solution.
-* [`PROBLEM-2-MOE-QUANTIZATION.md`](./PROBLEM-2-MOE-QUANTIZATION.md): Mathematical derivation and analysis of routing gate jitter ($\Delta W_g$), expert quantization ($\Delta W_e$), and why dLLM canvas refinement bounds routing misallocations.
-* [`RESULTS-laptop-pilot.md`](./RESULTS-laptop-pilot.md): Complete empirical logs from the $0 laptop experiment on matched Top-2 Sparse MoE pairs across {FP32, INT4, Ternary-QAT} and DRAM hardware profiling.
-* [`block_diffusion.py`](./block_diffusion.py): Reference implementation of the hybrid causal-past / bidirectional-candidate-block engine.
-* [`moe_quant.py`](./moe_quant.py): Matched Top-2 Sparse MoE benchmark script testing router flip rate and trajectory drift.
-* [`profile_hardware.py`](./profile_hardware.py): Arithmetic intensity (FLOPs/Byte) and DRAM streaming memory profiler.
+* **Memory Bandwidth vs Compute Trade-Off**:
+  * Block decoding of 32 candidate tokens reduces DRAM traffic by **1.91x** compared to standard AR with KV-cache.
+  * However, evaluating 32 candidate tokens across 12 refinement steps requires **384 token-forwards** (versus 64 for AR), incurring a **6.0x arithmetic compute overhead**.
+  * **Hardware Implication**: Speculative block decoding is strictly beneficial on compute-dense, memory-bandwidth-choked hardware (e.g. commodity CPUs, memory-bound accelerators).
+
+* **Architecture Disclosure**:
+  * Experiments utilizing `PrimeIntellect/qwen3-moe-tiny` serve as a **structural topology testbed** (measuring routing mechanics and parameter layouts on an untrained random skeleton), while real semantic adaptation is profiled via `Qwen/Qwen2.5-0.5B`.
 
 ---
 
-## Executive Summary of Pilot Findings
+## Repository Files
 
-1. **Hardware Physics Inversion**:
-   * Pure AR decoding is memory-bound ($\text{Intensity} \approx 0.5 - 4.0\text{ FLOPs/Byte}$).
-   * Block-Diffusion with Ternary experts reaches **$53.33\text{ FLOPs/Byte}$** (saturated compute).
-   * Generates 64 tokens with **$5.33\times$ fewer forward passes** (4.34x wall-clock speedup) and reduces total DRAM streaming from **1,716 MB to 16 MB** ($106.7\times$ total data reduction).
-
-2. **Empirical MoE Quantization Resilience**:
-   * **Ternary QAT Experts**: Trained cleanly from scratch on real text ($R = 1.000$, passing the pre-registered $R \le 1.25$ no-extra-tax criterion).
-   * **Router Gate Noise Absorption**: In end-to-end rollout, AR-MoE suffered **$20.31\%$** trajectory corruption due to compounding router misallocations, whereas dLLM-MoE canvas refinement limited corruption to **$12.50\%$** ($R = 0.615 < 0.80$, firing the strict `dllm_more_robust` verdict).
+* [`RESULTS-laptop-pilot.md`](./RESULTS-laptop-pilot.md): Methodological audit, physical memory profiles, and empirical stability benchmarks.
+* [`PROBLEM-1-AR-TO-DIFFUSION.md`](./PROBLEM-1-AR-TO-DIFFUSION.md): In-depth analysis of causal RoPE inversion and speculative block decoding pathways.
+* [`PROBLEM-2-MOE-QUANTIZATION.md`](./PROBLEM-2-MOE-QUANTIZATION.md): Mathematical formulations of expert quantization noise and router gate sensitivity.
+* [`profile_hardware.py`](./profile_hardware.py): Rigorous DRAM streaming profiler incorporating KV-cache amortization and batch-wide MoE expert activation.
+* [`moe_quant.py`](./moe_quant.py): Matched synthetic MoE training and quantization testbed with masked-token loss evaluation.
+* [`speculative_block_diffusion.py`](./speculative_block_diffusion.py): Confidence-gated speculative block decoding engine with verified fluency fallback.
+* [`run_64_sample_statistical_grid.py`](./run_64_sample_statistical_grid.py): Multi-prompt evaluation grid with router quantization and paired Student-t statistical tests.
+* [`marimo_moe_diffusion.py`](./marimo_moe_diffusion.py): Interactive Marimo notebook visualizing arithmetic intensity and memory bandwidth dynamics.

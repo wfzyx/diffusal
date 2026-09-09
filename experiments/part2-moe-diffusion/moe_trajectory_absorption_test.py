@@ -1,7 +1,7 @@
 """
 Native MoE Trajectory Absorption Test: AR vs. Block-Diffusion under Quantization
 ================================================================================
-Target: PrimeIntellect/qwen3-moe-tiny (24 Layers, 16 Experts, Top-4 Routing)
+Target: PrimeIntellect/qwen3-moe-tiny (Structural Topology Testbed - Untrained Random Weights)
 Tests whether Block-Diffusion canvas unmasking absorbs quantization error
 better than sequential AR rollout under:
   - FP32 Baseline
@@ -64,11 +64,15 @@ def run_trajectory_test():
         if hasattr(layer.mlp, 'experts'):
             layer.mlp.experts.gate_up_proj.data = quantize_tensor(layer.mlp.experts.gate_up_proj.data, bits=4.0)
             layer.mlp.experts.down_proj.data = quantize_tensor(layer.mlp.experts.down_proj.data, bits=4.0)
+        if hasattr(layer.mlp, 'gate'):
+            layer.mlp.gate.weight.data = quantize_tensor(layer.mlp.gate.weight.data, bits=4.0)
 
     for layer in tern_model.model.layers:
         if hasattr(layer.mlp, 'experts'):
             layer.mlp.experts.gate_up_proj.data = quantize_tensor(layer.mlp.experts.gate_up_proj.data, bits=1.58)
             layer.mlp.experts.down_proj.data = quantize_tensor(layer.mlp.experts.down_proj.data, bits=1.58)
+        if hasattr(layer.mlp, 'gate'):
+            layer.mlp.gate.weight.data = quantize_tensor(layer.mlp.gate.weight.data, bits=1.58)
 
     # 2. Sequential Autoregressive Rollout & Drift Measurement
     print("\n[Step 2] Measuring Sequential Autoregressive Rollout Drift...")
@@ -99,8 +103,10 @@ def run_trajectory_test():
                     
                     is_pad = (canvas == pad_id)
                     conf[~is_pad] = -1e9
-                    n_unmask = max(1, block_size // steps)
-                    unmask_count = min(n_unmask, int(is_pad.sum().item()))
+                    rem_steps = steps - s
+                    rem_pad = int(is_pad.sum().item())
+                    n_unmask = math.ceil(rem_pad / rem_steps) if rem_steps > 0 else rem_pad
+                    unmask_count = min(n_unmask, rem_pad)
                     if unmask_count > 0:
                         _, idx = torch.topk(conf[0], unmask_count)
                         canvas[0, idx] = pred[0, idx]

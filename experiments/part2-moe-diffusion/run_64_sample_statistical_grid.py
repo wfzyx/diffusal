@@ -145,11 +145,15 @@ def run_statistical_grid():
         if hasattr(layer.mlp, 'experts'):
             layer.mlp.experts.gate_up_proj.data = quantize_tensor(layer.mlp.experts.gate_up_proj.data, bits=4.0)
             layer.mlp.experts.down_proj.data = quantize_tensor(layer.mlp.experts.down_proj.data, bits=4.0)
+        if hasattr(layer.mlp, 'gate'):
+            layer.mlp.gate.weight.data = quantize_tensor(layer.mlp.gate.weight.data, bits=4.0)
 
     for layer in tern_model.model.layers:
         if hasattr(layer.mlp, 'experts'):
             layer.mlp.experts.gate_up_proj.data = quantize_tensor(layer.mlp.experts.gate_up_proj.data, bits=1.58)
             layer.mlp.experts.down_proj.data = quantize_tensor(layer.mlp.experts.down_proj.data, bits=1.58)
+        if hasattr(layer.mlp, 'gate'):
+            layer.mlp.gate.weight.data = quantize_tensor(layer.mlp.gate.weight.data, bits=1.58)
 
     gen_len = 32
     block_size = 16
@@ -160,20 +164,26 @@ def run_statistical_grid():
         pad_id = tokenizer.eos_token_id
         for _ in range(gen_len // block_size):
             canvas = torch.full((1, block_size), pad_id, dtype=torch.long)
-            for _ in range(steps):
+            for s in range(steps):
                 full_ids = torch.cat([curr, canvas], dim=1)
                 with torch.no_grad():
                     out = m(full_ids)
-                    b_logits = out.logits[:, curr.shape[1]:, :]
+                    # Next-token prediction: pos t predicts token at t+1
+                    b_logits = out.logits[:, curr.shape[1] - 1 : curr.shape[1] + block_size - 1, :]
                     probs = F.softmax(b_logits, dim=-1)
                     conf, pred = probs.max(dim=-1)
                     is_pad = (canvas == pad_id)
                     conf[~is_pad] = -1e9
-                    n_unmask = max(1, block_size // steps)
+                    
+                    unmasked_count = int((~is_pad).sum().item())
+                    rem_steps = steps - s
+                    n_unmask = math.ceil((block_size - unmasked_count) / rem_steps)
                     unmask_count = min(n_unmask, int(is_pad.sum().item()))
                     if unmask_count > 0:
                         _, idx = torch.topk(conf[0], unmask_count)
                         canvas[0, idx] = pred[0, idx]
+                        
+            assert (canvas == pad_id).sum() == 0, "All block positions must be completely unmasked!"
             curr = torch.cat([curr, canvas], dim=1)
         return curr[:, input_ids.shape[1]:]
 
@@ -246,7 +256,10 @@ def run_statistical_grid():
     print(f"  • Ternary AR Drift:             {ar_tern_m*100:.2f}% [95% CI: {(ar_tern_m-ar_tern_err)*100:.2f}%, {(ar_tern_m+ar_tern_err)*100:.2f}%]")
     print(f"  • Ternary Block-Diffusion Drift:{diff_tern_m*100:.2f}% [95% CI: {(diff_tern_m-diff_tern_err)*100:.2f}%, {(diff_tern_m+diff_tern_err)*100:.2f}%]")
     print(f"  • Mean Excess Gap:              {excess_m*100:.2f} percentage points [95% CI: {excess_low*100:.2f} pp, {excess_high*100:.2f} pp]")
-    print(f"  • Zero within 95% CI?           {'NO - STATISTICALLY SIGNIFICANT (p < 0.001)' if excess_high < 0 else 'YES'}")
+    import scipy.stats as stats
+    t_stat, p_val = stats.ttest_1samp(tern_excess_list, 0.0)
+    print(f"  • Paired t-test vs zero:        t = {t_stat:.3f}, p = {p_val:.4e}")
+    print(f"  • Statistically significant?    {'YES (p < 0.05)' if p_val < 0.05 else 'NO (zero within 95% CI)'}")
     print("=" * 82)
 
 if __name__ == '__main__':
