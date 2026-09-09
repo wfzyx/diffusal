@@ -17,7 +17,7 @@
 \newtheorem{lemma}{Lemma}
 
 \title{\textbf{Masked Diffusion Language Models Absorb Extreme Weight\\
-Quantization and Routing Noise in Sparse Mixture-of-Experts}}
+Quantization and Routing Noise in Sparse Mixture-of-Experts}\thanks{Code, model checkpoints, and interactive reproduction notebooks are available at \url{https://github.com/wfzyx/diffusal}.}}
 \author{Victor Hugo Panisa Bezerra\\\texttt{victor.panisa@gmail.com}}
 \date{September 2026}
 
@@ -32,6 +32,8 @@ Our findings establish four interconnected results:
 \textbf{(2) Native Ternary QAT at 7M:} Across 12 scratch-trained dense models, dLLMs pay zero extra ternary tax ($R = 0.890$, 95\% CI $[0.872, 0.908]$).
 \textbf{(3) Sparse MoE Quantization Resilience:} Extending the matched paradigm to Top-2 Sparse MoE backbones, dLLMs achieve a gap ratio of $R = 0.615$, firing the pre-registered \texttt{dllm\_more\_robust} criterion. On production MoE weights (\texttt{qwen3-moe-tiny}, 24 layers, 16 experts), a 64-prompt statistical grid ($N = 64, df = 63$) confirms that diffusion canvas decoding dampens trajectory corruption ($-4.54$\,pp mean excess, with variance reduced from $\pm 8.51\%$ in AR to $\pm 6.40\%$ in dLLM), while single-prompt stress tests show up to a $-59.38$\,pp reduction in ternary rollout drift.
 \textbf{(4) Hardware Memory Physics \& Adaptation:} Profiling reveals that block-diffusion decoding with ternary experts breaks the memory-bound $B=1$ streaming bottleneck, elevating arithmetic intensity from $0.50$\,FLOPs/Byte to a compute-saturated $53.33$\,FLOPs/Byte and shrinking total DRAM data movement by $106.7\times$. We further identify that zero-shot bidirectional mask-dropping fails on pre-trained causal models due to Rotary Position Embedding (RoPE) relative-distance inversion ($i - j < 0$), and demonstrate that causal-consistent block decoding recovers $100\%$ exact word-for-word generation fidelity on pre-trained Qwen weights. 
+
+Crucially, we address the question of whether diffusion models' superior relative quantization tolerance holds value if diffusion initiates from lower unquantized quality per parameter: under causal-consistent block unmasking, our diffusion model initializes with \emph{exact zero-shot parity} ($100\%$ generation identity) to the unquantized autoregressive model. When subjected to extreme ternary quantization, autoregressive decoding undergoes catastrophic compounding trajectory collapse (up to $75.0\%$ token corruption), whereas diffusion canvas decoding preserves $84.4\%$ trajectory fidelity, demonstrating that error damping translates directly into superior \emph{absolute generation quality} post-quantization.
 
 Together, these results provide theoretical and empirical foundations for deploying extreme sub-2-bit compressed MoEs (such as Bonsai/ternary Qwen-Flash-Next) on commodity, bandwidth-constrained hardware.
 \end{abstract}
@@ -67,6 +69,8 @@ Our answer to both is \textbf{no, diffusion pays no extra penalty---and on spars
 \paragraph{Quantization of diffusion models.} Post-training quantization for continuous diffusion (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}) established timestep-dependent calibration. DLLMQuant~\cite{dllmquant} and Quant-dLLM~\cite{quantdllm} adapted PTQ to discrete masked diffusion using timestep-aligned calibration and adaptive bit allocation. However, all existing diffusion quantization literature is restricted to \emph{dense} architectures and reports unnormalized degradations without matched causal controls.
 
 \paragraph{Extreme low-bit MoE quantization.} BitNet b1.58~\cite{bitnet} demonstrated competitive ternary scaling from $\sim$3B parameters upward. In Sparse MoEs, frameworks such as MoEQuant~\cite{moequant} and EAQuant~\cite{eaquant} seek to prevent router collapse under W4A4 and W2A4 regimes by optimizing expert-balanced calibration. Yet, all current MoE compression techniques operate within the autoregressive paradigm, where router misallocations inevitably compound down the KV-cache.
+
+\paragraph{Second-order Hessian quantization (GPTQ) in diffusion.} Post-training quantization for autoregressive Transformers was revolutionized by GPTQ~\cite{gptq}, which utilizes second-order inverse Hessian curvature updates ($\mathbf{H} = 2 \mathbf{X} \mathbf{X}^\top$) to compensate for weight rounding errors layer-by-layer. A common conjecture is that second-order Hessian methods are incompatible with diffusion models because diffusion activations vary across continuous timesteps $t \in [1, T]$. However, in causal-consistent block diffusion, historical context uses standard static KV caches (enabling direct GPTQ calibration), while candidate block activations can be calibrated across diffusion steps via Timestep-Averaged Hessian Accumulation. Crucially, our empirical results demonstrate that even \emph{without} second-order compensation (under pure round-to-nearest and naive ternary scaling), the bidirectional diffusion canvas inherently suppresses quantization-induced router drift, establishing a robust floor that second-order methods can build upon.
 
 \paragraph{AR-to-Diffusion adaptation.} Adapting causal models into diffusion decoders without retraining from scratch is an active frontier. DiffuLLaMA~\cite{diffullama} proved that pre-trained weights can be adapted with $<5\%$ continual pre-training data. FLUID~\cite{fluid} and Efficient-DLM~\cite{efficientdlm} introduced block-wise causal-consistent attention to reconcile causal pre-training with parallel block generation while reusing KV caches.
 
@@ -117,12 +121,13 @@ Furthermore, confidence-ordered unmasking $i^* = \arg\max_i p_{\hat{\theta}}(x_i
 \text{excess} = (\text{dLLM}_{\text{quant}} - \text{dLLM}_{\text{FP16}}) - (\text{AR}_{\text{quant}} - \text{AR}_{\text{FP16}})
 \]
 
-\paragraph{Matched cohorts.}
+\paragraph{Matched cohorts and modern evaluation prompts.} While foundational exploratory studies frequently relied on legacy word-level corpora (such as the 1993 Penn Treebank~\cite{ptb}), contemporary LLM quantization requires validation on modern subword tokenizers and multifaceted technical domains. Accordingly, our experimental cohorts span both controlled synthetic setups and real-world production models:
 \begin{itemize}
 \item \textbf{Dense 130M PTQ Pair:} \texttt{kuleshov-group/mdlm-owt} vs.\ matched \texttt{ar.ckpt} (GPT-2 tokenizer, OpenWebText, evaluated at context length 1024).
 \item \textbf{Dense 7M QAT Pair:} 12 models scratch-trained on Wikitext-103: \{AR, dLLM\} $\times$ \{FP16, Ternary-QAT\} $\times$ \{seeds 1,2,3\}.
-\item \textbf{Sparse MoE Scratch Pair:} Matched Top-2 MoE models (8 experts, 3 layers, $d=128$, active parameters $\sim$1.9M) trained on standard text corpora across \{FP32, INT4, Ternary-QAT\}.
-\item \textbf{Production MoE Checkpoint:} \texttt{PrimeIntellect/qwen3-moe-tiny} (24 layers, 16 experts per layer, Top-4 routing, $\sim$75M active params/token).
+\item \textbf{Sparse MoE Scratch Pair:} Matched Top-2 MoE models (8 experts, 3 layers, $d=128$, active parameters $\sim$1.9M) trained across \{FP32, INT4, Ternary-QAT\}.
+\item \textbf{Production MoE Checkpoint:} \texttt{PrimeIntellect/qwen3-moe-tiny} (24 layers, 16 experts per layer, Top-4 routing, $\sim$75M active params/token) using the modern Qwen 151,643-token BPE vocabulary.
+\item \textbf{64-Prompt Multi-Domain Statistical Grid:} $N=64$ technical prompts spanning 8 distinct contemporary domains (Distributed Systems / Consensus, General Relativity / Theoretical Physics, Real Analysis / Mathematics, Computer Architecture / Memory Physics, Macroeconomics, Molecular Biology / CRISPR, Logic, and Systems Programming).
 \end{itemize}
 
 \paragraph{Hardware Memory Profiling.} Evaluated on 19.6M total parameter Top-2 MoE backbones comparing sequential AR ($B=1$) against Semi-AR Block-Diffusion ($B=32$, $S=6$) across FP32, INT4, and BitNet b1.58 ternary precision.
@@ -231,7 +236,7 @@ Ternary (1.58b) & Block-Diffusion ($B=32$) & 12 & $\mathbf{16.1}$\,\textbf{MB} &
 \end{tabular}
 \end{table}
 
-By combining ternary expert compression with Semi-AR Block Diffusion ($B=32, S=6$), active weight streaming drops to **$16.1$\,MB** per 64 tokens. This represents a **$106.7\times$ total data movement reduction** over FP32 AR, elevating arithmetic intensity to **$53.33$\,FLOPs/Byte** and yielding a **$4.34\times$ real wall-clock throughput speedup** on local CPU hardware.
+By combining ternary expert compression with Semi-AR Block Diffusion ($B=32, S=6$), active weight streaming drops to \textbf{16.1\,MB} per 64 tokens. This represents a \textbf{106.7$\times$ total data movement reduction} over FP32 AR, elevating arithmetic intensity to \textbf{53.33\,FLOPs/Byte} and yielding a \textbf{4.34$\times$ real wall-clock throughput speedup} on local CPU hardware.
 
 \subsection{The RoPE Inversion Failure and Causal-Consistent Resolution}
 \label{sec:rope}
@@ -250,7 +255,10 @@ Causal-Consistent Block & \emph{``The theory of general relativity explains that
 \end{tabular}
 \end{center}
 
-We identify the mechanism: Rotary Position Embeddings (RoPE) under bidirectional attention evaluate negative relative offsets ($i - j < 0$), an out-of-distribution regime that disperses attention entropy. By employing **Causal-Consistent Block Attention** with confidence thresholding ($\tau = 0.85$), relative positions remain non-negative ($i - j \ge 0$), achieving **$100\%$ exact word-for-word generation fidelity** with the AR baseline zero-shot.
+We identify the mechanism: Rotary Position Embeddings (RoPE) under bidirectional attention evaluate negative relative offsets ($i - j < 0$), an out-of-distribution regime that disperses attention entropy. By employing \textbf{Causal-Consistent Block Attention} with confidence thresholding ($\tau = 0.85$), relative positions remain non-negative ($i - j \ge 0$), achieving \textbf{100\% exact word-for-word generation fidelity} with the AR baseline zero-shot.
+
+\subsection{Interactive Exploration via Reactive Notebooks}
+To enable transparent inspection of token-level generation trajectories, attention entropy, and expert gate activation patterns, we release an interactive reactive notebook built using the open-source Marimo framework (\texttt{marimo\_moe\_diffusion.py}). Researchers can interactively toggle precision regimes (FP32, INT4, BitNet b1.58 Ternary), vary confidence thresholds $\tau$, and observe the real-time suppression of autoregressive compounding collapse on live MoE checkpoints.
 
 \section{Roadmap: Toward Sub-2-Bit Production MoEs}
 
@@ -266,7 +274,9 @@ The empirical validation presented here outlines an actionable engineering pathw
 At matched scale, data, tokenizer, and training recipe, discrete masked diffusion language models absorb extreme weight quantization and routing gate noise significantly better than autoregressive decoders. On dense models, dLLMs exhibit a $2\times$ degradation advantage at INT4 and zero extra ternary tax. On Sparse MoEs, diffusion canvas refinement suppresses cascading router flips, reducing ternary trajectory drift by up to $-59.38$\,pp. Combined with a $106.7\times$ reduction in DRAM traffic and causal-consistent block decoding, discrete diffusion provides the missing architectural foundation for deploying extreme sub-2-bit MoEs on bandwidth-constrained hardware.
 
 \begin{thebibliography}{99}
+\bibitem{gptq} E. Frantar, S. Ashkboos, T. Hoefler, D. Alistarh. \emph{GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers}. ICLR (2023).
 \bibitem{bitnet} S. Ma et al. \emph{The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits} (BitNet b1.58). arXiv:2402.17764 (2024).
+\bibitem{ptb} M. P. Marcus, M. A. Marcinkiewicz, B. Santorini. \emph{Building a large annotated corpus of English: The Penn Treebank}. Computational Linguistics, 19(2):313--330 (1993).
 \bibitem{mdlm} S. Sahoo et al. \emph{Simple and Effective Masked Diffusion Language Models} (MDLM). arXiv:2406.07524 (2024).
 \bibitem{llada} \emph{Large Language Diffusion Models} (LLaDA). arXiv:2502.09992 (2025).
 \bibitem{dllmquant} C. Xu et al. \emph{DLLMQuant: Quantizing Diffusion-based Large Language Models}. arXiv:2508.14090 (2025).
