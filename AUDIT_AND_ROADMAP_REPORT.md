@@ -18,7 +18,7 @@ Following a comprehensive adversarial review (`opus_review.md`), the codebase an
 
 2. **Track B (`disperser` branch)**: The exploratory line investigating speculative parallel block decoding and native Mixture-of-Experts (MoE) quantization.
    * **Status**: **Audited, Corrected, and Experimentally Validated**.
-   * Addressed all 13 reviewer findings (`F1`–`F13`, `C1`–`C6`): disclosed `qwen3-moe-tiny` as an untrained random initialization testbed, eliminated unmasking dilution (unmasking all positions), corrected DRAM physics (accounting for KV cache and batch-wide MoE expert activation: $1.91\times$ DRAM reduction at $6\times$ arithmetic overhead), quantized router gates across evaluations, and empirically verified that Jacobi speculative decoding with confidence thresholding ($\tau = 0.85$) preserves 100% exact English fluency on genuine pre-trained checkpoints (`Qwen2.5-0.5B`).
+   * Addressed all 13 reviewer findings (`F1`–`F13`, `C1`–`C6`): disclosed `qwen3-moe-tiny` as an untrained random initialization testbed, eliminated unmasking dilution (unmasking all positions), corrected DRAM physics (accounting for KV cache and batch-wide MoE expert activation: $1.91\times$ DRAM reduction at $6\times$ arithmetic overhead), quantized router gates across evaluations, and empirically verified that Jacobi speculative decoding with confidence thresholding ($\tau = 0.85$) reproduces the AR greedy rollout as a correctness check without quantization-drift attenuation.
 
 ---
 

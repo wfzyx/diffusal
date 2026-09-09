@@ -93,18 +93,23 @@ Condition              | AR-MoE         | dLLM-MoE       | Excess (dLLM - AR) | 
 --------------------------------------------------------------------------------
 FP32 Val Loss          |  2.4391        |  3.3454        | -                  | -
 INT4 Val Loss          |  2.4391        |  3.3454        | -                  | -
-INT4 Loss Degradation  |  +0.00%        |  -0.00%        |  -0.00 pp          | -0.156
+INT4 Loss Degradation  |  +0.00%        |  -0.00%        |  -0.00 pp          | nan
 Ternary-QAT Val Loss   |  2.4264        |  3.3536        | -                  | -
-Ternary-QAT Loss Degr  |  -0.52%        |  +0.24%        |  +0.76 pp          | -0.471
+Ternary-QAT Loss Degr  |  -0.52%        |  +0.24%        |  +0.76 pp          | nan
 Router Flip (INT4)     |   4.46%        |   8.88%        |  +4.42 pp          | 1.991
-Trajectory Drift       |  11.33% (gen)  |   0.00% (canv) | -11.33 pp          | 0.000
+Trajectory Drift       |  11.33% (gen)  |   0.00% (canv) | -11.33 pp          | uninformative
 ================================================================================
 ```
 
 ### Pilot Criteria Evaluation:
-1. **Pilot 'No Extra Tax' Threshold ($R \le 1.25$)**: **PASSED** ($+0.76\text{ pp}$ excess for Ternary-QAT, $-0.00\text{ pp}$ excess for INT4; with degradation taxes near zero or slightly negative due to regularization effects, absolute loss delta $\Delta\text{nats}$ is $+0.0082$ for dLLM vs $-0.0127$ for AR under Ternary-QAT).
-2. **Router Gating Sensitivity**: Under 4-bit RTN, router flip rate is $4.46\%$ (AR) vs $8.88\%$ (dLLM), confirming router jitter occurs under RTN and indicating router projections should be retained in INT8 or stabilized with routing auxiliary loss during QAT.
-3. **Exploratory Scope**: These small-scale pilot metrics demonstrate the execution and convergence of the training and paired quantization benchmark; they are exploratory laptop-scale benchmarks on character-level text and are not pre-registered conference claims.
+1. **Pilot Criterion**: `expected_uninformative`.
+   * **Undertrained Regime (Noise Divided by Noise)**: At 250 steps ($\approx 0.26$ epochs of TinyShakespeare), validation loss sits at 2.44 nats for AR and 3.35 nats for dLLM (far above the $\approx 1.4 - 1.5$ nats of a converged character model). An 8% relative weight perturbation under INT4 PTQ shifts AR validation loss by merely $1.9 \times 10^{-5}$ nats ($0.00078\%$, or 8 parts per million). Because loss does not yet respond to its own weights, loss degradation taxes of $\pm 0.00\%$ and the derived ratios $R$ are uninformative noise divided by noise and are reported as `nan`. Any informative benchmark requires an informativeness gate requiring INT4 PTQ to move validation loss by $>1\%$ relative before evaluating $R$.
+2. **The Empirical Headline: Router Flip Asymmetry**:
+   * Under INT4 RTN, the router flip rate is **$8.88\%$ for dLLM vs $4.46\%$ for AR ($R = 1.991$)** — running **$2\times$ against the dLLM**. Bidirectional masked representations induce twice the routing instability of causal prefix representations under weight quantization. This is the sole row in the benchmark with genuine physical signal.
+3. **Trajectory Drift Degeneracy (0.00%)**:
+   * The $0.00\%$ drift in dLLM canvas generation reflects byte-identical canvases across the unperturbed logits: a $1.9 \times 10^{-5}$ loss shift cannot flip a top-confidence argmax. Without an entropy and loss-sensitivity guard, $0.00\%$ is an uninformative degeneracy artifact rather than proof of zero drift.
+4. **Ternary-QAT Seed Confound**:
+   * `ar_ternary` and `dllm_ternary` were separately initialized and trained from scratch with $n=1$, confounding quantization response with optimization trajectory variance (demonstrated by AR's negative tax of $-0.52\%$). A definitive measurement requires multi-seed averaging (as in Exp 2).
 
 ---
 
@@ -123,5 +128,5 @@ When the drift is recomputed exclusively on active (unmasked) positions:
 
 ### Key Methodological Takeaway:
 On an untrained random architecture without learned semantics, speculative parallel decoding provides **no magical trajectory absorption**. Trajectory stability on real language models requires either:
-1. **Speculative Confidence Thresholding ($\\tau$)**: As empirically verified on `Qwen2.5-0.5B`, accepting tokens only when confidence exceeds $\\tau = 0.85$ restores 100% exact autoregressive fidelity.
+1. **Speculative Confidence Thresholding ($\tau$)**: Speculative decoding reproduces greedy AR output as an AR correctness verification check ($57$ passes for $32$ tokens, $0.60$ tok/pass, $\sim 7.6\times$ slower than greedy AR on `Qwen2.5-0.5B`), reproducing the AR rollout without quantization error attenuation.
 2. **Native QAT Fine-Tuning**: Training weights under quantization noise so representations adapt to low-bit discretization.
