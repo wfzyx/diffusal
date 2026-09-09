@@ -57,7 +57,7 @@ at identical precision, scale, data, tokenizer, and recipe.
 
 \paragraph{PTQ pair (130M).} Primary dLLM: \texttt{kuleshov-group/mdlm-owt} ($\sim$130M non-embedding, GPT-2 tokenizer, OpenWebText). Matched AR control: the same release's \texttt{ar.ckpt}, trained by the same authors on the same data at the same scale in the same codebase. Both evaluated at \texttt{model.length=1024} with the repo's \texttt{data=openwebtext-split} config (tokenizer verified identical). Naive round-to-nearest PTQ at INT8, INT4, ternary. Evaluation runs through the bd3lms codebase (the mdlm repo's zero-shot eval cannot reproduce its own published numbers) with a numerically-validated flash-attention$\to$SDPA shim.
 
-\paragraph{QAT pair (7M).} Twelve models trained from scratch on Wikitext103: \{AR, dLLM\} $\times$ \{FP16, ternary-QAT\} $\times$ \{seed 1,2,3\}. Tiny BD3LMS backbone ($\sim$7M non-embedding params), 6{,}000 steps, global batch 64. Ternarization is BitNet-style absmean with a straight-through estimator; embeddings, output head, norms, and biases are excluded (21.5\% of model-state params ternarized---a limitation, \S\ref{sec:limitations}).
+\paragraph{QAT pair (7M).} Twelve models trained from scratch on Wikitext103: \{AR, dLLM\} $\times$ \{FP16, ternary-QAT\} $\times$ \{seed 1,2,3\}. Tiny BD3LMS backbone ($\sim$7M non-embedding params), 6{,}000 steps, global batch 64. Ternarization is BitNet-style absmean with a straight-through estimator; embeddings, output head, norms, and biases are excluded (21.5\% of model-state params ternarized in dLLM vs.\ 19.6\% in AR due to dLLM timestep/adaLN projections---a slight asymmetry running against the dLLM; see \S\ref{sec:limitations}).
 
 \paragraph{Metrics.} PTQ: validation-likelihood degradation relative to each model's own FP16, plus a generative anchor (64 samples/condition, GPT-2-large oracle perplexity, with a unigram-entropy degeneracy guard). QAT: per-model ``tax'' $=$ ternary/FP16 relative degradation, summarized by the gap ratio $R = \text{dLLM-tax} / \text{AR-tax}$.
 
@@ -179,11 +179,11 @@ Single RTX 2080 Super (8GB, sm75, no FlashAttention-2). All configs, checkpoint 
 
 \begin{itemize}
 \item \textbf{Scale.} Smallest matched PTQ pair is 130M; QAT pair is $\sim$7M. Nothing here transfers to 1B$+$ without evidence.
-\item \textbf{The QAT rung is confounded three ways.} At 7M, ternary is below BitNet's $\sim$3B competitiveness threshold, only 21.5\% of params are ternarized, and the dLLM objective is a NELBO bound rather than exact likelihood. The 130M INT4 PTQ result carries none of these; treat it as the spine and QAT as the riskier supporting evidence.
+\item \textbf{The QAT rung is confounded three ways.} At 7M, ternary is below BitNet's $\sim$3B competitiveness threshold, only 21.5\% of dLLM params (19.6\% of AR params) are ternarized, and the dLLM objective is a NELBO bound rather than exact likelihood. The 130M INT4 PTQ result carries none of these; treat it as the spine and QAT as the riskier supporting evidence.
 \item \textbf{No absolute-quality parity claim.} dLLMs lose to AR on absolute quality at these scales regardless of quantization. This paper is about \emph{relative sensitivity to quantization}, not usefulness.
 \item \textbf{PTQ method.} Naive round-to-nearest throughout, by design---the matched control, not calibration engineering, carries the claim.
 \item \textbf{No mechanism.} \S\ref{sec:mechanism} rejects the obvious one and offers no replacement.
-\item \textbf{No deployment claim.} Only 21.5\% of params ternarized; weight-only idealized reduction is $\sim$1.23$\times$. No packed-ternary kernel, latency, or VRAM claim is made.
+\item \textbf{No deployment claim.} Only 21.5\% of dLLM params (19.6\% in AR) are ternarized; weight-only idealized reduction is $\sim$1.23$\times$. No packed-ternary kernel, latency, or VRAM claim is made.
 \end{itemize}
 
 \section{Conclusion}

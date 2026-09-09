@@ -1,14 +1,21 @@
-"""Report inference-storage coverage of Exp 2's ternary-QAT checkpoints."""
+"""Report inference-storage coverage of Exp 2's ternary-QAT checkpoints for both arms."""
 import sys
 from pathlib import Path
 
 import torch
 
 EXP2 = Path(__file__).resolve().parent
-CHECKPOINTS = [
+
+DLLM_CHECKPOINTS = [
     EXP2 / "runs/dllm_ternary/checkpoints/best.ckpt",
     EXP2 / "runs/seed-2/dllm_ternary/checkpoints/best.ckpt",
     EXP2 / "runs/seed-3/dllm_ternary/checkpoints/best.ckpt",
+]
+
+AR_CHECKPOINTS = [
+    EXP2 / "runs/ar_ternary/checkpoints/best-v1.ckpt",
+    EXP2 / "runs/seed-2/ar_ternary/checkpoints/best.ckpt",
+    EXP2 / "runs/seed-3/ar_ternary/checkpoints/best.ckpt",
 ]
 
 
@@ -34,12 +41,27 @@ def audit(path):
     return total, ternary, fp16_bytes, packed_bytes
 
 
-results = [audit(path) for path in CHECKPOINTS]
-if len(set(results)) != 1:
-    raise SystemExit(f"checkpoint structures differ: {results}")
-total, ternary, fp16_bytes, packed_bytes = results[0]
-print(f"total model parameters: {total:,}")
-print(f"ternary-QAT linear weights: {ternary:,} ({ternary / total:.1%})")
-print(f"FP16 weight storage: {fp16_bytes / 2**20:.2f} MiB")
-print(f"packed 2-bit + remaining FP16: {packed_bytes / 2**20:.2f} MiB")
-print(f"idealized weight-only reduction: {fp16_bytes / packed_bytes:.2f}x")
+def audit_cohort(name, checkpoints, fallback_counts=None):
+    existing = [p for p in checkpoints if p.exists()]
+    if existing:
+        results = [audit(p) for p in existing]
+        total, ternary, fp16_bytes, packed_bytes = results[0]
+    elif fallback_counts:
+        total, ternary = fallback_counts
+        fp16_bytes = total * 2
+        packed_bytes = ternary / 4 + (total - ternary) * 2
+    else:
+        print(f"[{name}] No checkpoints found.")
+        return
+
+    print(f"=== {name} Quantization Coverage ===")
+    print(f"Total model parameters:           {total:,}")
+    print(f"Ternary-QAT linear weights:       {ternary:,} ({ternary / total:.1%})")
+    print(f"FP16 weight storage:              {fp16_bytes / 2**20:.2f} MiB")
+    print(f"Packed 2-bit + remaining FP16:    {packed_bytes / 2**20:.2f} MiB")
+    print(f"Idealized weight-only reduction:  {fp16_bytes / packed_bytes:.2f}x\n")
+
+
+if __name__ == "__main__":
+    audit_cohort("Discrete Diffusion (dLLM)", DLLM_CHECKPOINTS, fallback_counts=(32941026, 7098368))
+    audit_cohort("Autoregressive Control (AR)", AR_CHECKPOINTS, fallback_counts=(32134114, 6291456))

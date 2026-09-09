@@ -10,7 +10,12 @@ That single `.tex` is the entire upload. No `.bbl` needed (bibliography is inlin
 
 ## Compile locally before uploading (recommended)
 
-No TeX engine is installed on this machine. Compile with any of:
+Tectonic is installed locally on this machine (`C:\Users\wfzyx\tools\tectonic\tectonic.exe`). Compile with any of:
+
+```bash
+# Windows command line (Tectonic)
+C:\Users\wfzyx\tools\tectonic\tectonic.exe diffusal-arxiv.tex
+```
 
 ```bash
 # TeX Live (standard)
@@ -41,7 +46,7 @@ Confirm the PDF renders both tables and the abstract with no overfull-box disast
 - [ ] Every number in the tables matches `experiments/exp0/RESULTS.md` and `experiments/exp2/RESULTS-replication.md`.
 - [ ] Pre-registration release tags exist and are public: `prereg-exp0-2026-07-16`, `prereg-exp2-pilot-2026-07-16.1`.
 - [ ] The reproducibility release (configs, checkpoint SHA-256, shim) is pushed and linked, or a URL placeholder is replaced before upload.
-- [ ] Limitations section still lists all three QAT confounds (sub-3B scale, 21.5% coverage, NELBO bound).
+- [x] Limitations section lists both QAT coverage figures (21.5% dLLM, 19.6% AR), sub-3B scale, and NELBO bound.
 - [ ] Author name / email / affiliation correct.
 
 ## Version plan
