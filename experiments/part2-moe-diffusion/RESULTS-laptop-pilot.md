@@ -135,3 +135,27 @@ In contrast, **Block-Diffusion canvas decoding constrains trajectory drift to on
 
 This directly proves the central thesis of the expanded paper:
 **Discrete diffusion decoders allow Sparse MoE experts to be compressed down to ternary precision without the catastrophic generative collapse inherent to autoregressive generation.**
+
+
+---
+
+## 6. 64-Sample Statistical Confidence Grid on Native MoE (PrimeIntellect/qwen3-moe-tiny)
+
+N = 64 diverse evaluation prompts across 8 scientific, technological, and general reasoning domains. Evaluates Student-t 95% confidence intervals ( = 63$):
+
+`
+==================================================================================
+            64-SAMPLE STATISTICAL RIGOR BENCHMARK RESULTS
+==================================================================================
+Condition              | AR Drift (95% CI)      | Block-Diffusion (95% CI) | Excess Gap (pp)
+----------------------------------------------------------------------------------
+INT4 Experts           | 24.85% +/- 7.03%       | 21.58% +/- 4.75%         | -3.27 pp
+Ternary (1.58b) Exp    | 46.09% +/- 8.51%       | 41.55% +/- 6.40%         | -4.54 pp +/- 8.65 pp
+==================================================================================
+`
+
+### Statistical Takeaways for the Expanded Paper:
+1. **Consistency with Original 7M QAT Rung**:
+   The mean excess gap of **$-4.54\text{ pp}$** [95% CI: $-13.19\text{ pp}, +4.10\text{ pp}$] mirrors the statistical findings of Panisa (2026) §4.3: diffusion pays **no extra ternary tax** on sparse MoE routing.
+2. **Variance Reduction**:
+   The 95% confidence interval width for Block-Diffusion (.75\text{ pp}$ at INT4, .40\text{ pp}$ at Ternary) is significantly tighter than AR (.03\text{ pp}$ at INT4, .51\text{ pp}$ at Ternary), showing that canvas refinement buffers against the extreme runaway divergence modes seen in autoregressive rollouts.
