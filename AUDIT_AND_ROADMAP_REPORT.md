@@ -48,9 +48,9 @@ The initial pilot reported an unphysical "$106.7\times$ DRAM traffic reduction."
 1. **Autoregressive Baseline**: Equipped with KV-cache reuse.
 2. **MoE Expert Activation Dispersion**: In a candidate block of 32 tokens, probability of an expert remaining unselected is $(1 - 2/8)^{32} \approx 0.0001$. Consequently, **all 8 experts are streamed per block forward pass**.
 3. **Corrected Physical Trade-Off**:
-   * **DRAM Memory Reduction**: **$1.91\times$** (e.g. 32.55 MB $\to$ 17.06 MB in FP32; 2.03 MB $\to$ 1.07 MB in Ternary).
+   * **DRAM Memory Reduction**: **$1.91\times$** (e.g. 1716.1 MB $\to$ 897.8 MB in FP32; 107.3 MB $\to$ 56.1 MB in Ternary).
    * **Arithmetic Compute Penalty**: 12 block passes $\times$ 32 tokens = **384 token-forwards**, versus **64 token-forwards** for AR (**$6.0\times$ more FLOPs**).
-   * **Empirical Execution**: Benchmarked on laptop CPU: AR generates at 242 tok/s ($0.264$s) vs Speculative Block at 218 tok/s ($0.292$s), confirming that on compute-dominated hardware, arithmetic overhead offsets bandwidth reduction.
+   * **Empirical Execution**: The profiler analytically models DRAM weight streaming and arithmetic intensity across precisions, confirming that on compute-dominated hardware, the 6.0x arithmetic overhead offsets bandwidth reduction unless memory bandwidth is the primary bottleneck.
 
 ### B. Sampler Dilution & The Jacobi Identity
 1. **Dilution Bug**: The previous $-59.38$ pp drift reduction was an artifact of `n_unmask = max(1, 16 // 6) = 2`, leaving 4 tokens permanently frozen as `eos_token_id`. With dynamic unmasking scheduling (`math.ceil(rem_pad / rem_steps)`), all positions are evaluated.
@@ -58,7 +58,7 @@ The initial pilot reported an unphysical "$106.7\times$ DRAM traffic reduction."
 3. **Empirical Validation on `Qwen2.5-0.5B`**:
    * Naive bidirectional attention on RoPE: Produces complete semantic collapse.
    * Causal block decoding without confidence gating: Cascades errors on downstream tokens.
-   * **Speculative block decoding with confidence thresholding ($\tau = 0.85$)**: Achieves **100% exact match** to AR greedy generation, with **flawless English fluency**.
+   * **Speculative block decoding with confidence thresholding ($\tau = 0.85$)**: Serves as an AR correctness verification check ($57$ passes for $32$ tokens, $0.60$ tok/pass, $\sim 7.6\times$ slower than greedy AR) achieving **100% exact match** to AR greedy rollout with flawless English fluency; crucially, reproducing AR rollout means reproducing the *quantized* AR rollout on quantized weights, offering zero quantization-drift attenuation.
 
 ---
 

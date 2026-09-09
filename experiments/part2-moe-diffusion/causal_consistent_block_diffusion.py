@@ -6,8 +6,8 @@ Investigates causal block iterative updating on pre-trained Qwen2.5-0.5B.
 - EMPIRICAL FINDING: Because candidate positions are updated without confidence
   thresholding (tau) or speculative verification, un-gated Jacobi block updates
   cascade errors to downstream positions (resulting in repeated/degenerate text).
-- For the confidence-thresholded engine that guarantees 100% exact AR fluency,
-  see `speculative_block_diffusion.py`.
+- Speculative decoding reproduces greedy AR output as a correctness check,
+  but is slower at this block size and offers no quantization-drift buffer.
 """
 
 import sys

@@ -28,3 +28,6 @@ arxiv/*.pdf
 /REVIEWER-2.md
 /SCALE-AND-COMPUTE-PLAN.md
 /SUGGESTIONS.md
+
+# Datasets
+corpus.txt

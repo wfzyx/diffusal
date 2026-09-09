@@ -50,6 +50,7 @@ TERNARY (0.25B) | Speculative Block      |        56.1 MB  |        5.40 GFLOP| 
 1. **DRAM Bandwidth Reduction**: **1.91x reduction** (1716.1 MB down to 897.8 MB in FP32; 107.3 MB down to 56.1 MB in Ternary).
 2. **Arithmetic Work Overhead**: Speculative block decoding evaluates 32 tokens per forward pass over 12 passes = **384 token-forwards**, compared to **64 token-forwards** for AR. This represents a **6.0x compute trade-off** (5.40 GFLOP vs 0.90 GFLOP).
 3. **Hardware Sweet Spot**: Speculative block decoding is strictly advantageous on **memory-bandwidth-bound hardware** (e.g., edge CPU, unified memory with low bandwidth) where memory bus streaming dominates arithmetic compute time.
+4. **Conservative AR DRAM Traffic**: The AR DRAM streaming profile counts sequential weight streaming but omits KV-cache read traffic. This slightly understates AR's true DRAM traffic, making the reported $1.91\times$ bandwidth reduction conservative.
 
 ---
 
@@ -75,6 +76,7 @@ Prompt: "The theory of general relativity explains that gravity is"
 
 ### Finding:
 Confirms that **unadapted bidirectional canvas sampling on pre-trained causal models produces immediate semantic disintegration**.
+*(Note on Confound: The upcycled Qwen MoE routes through an **untrained** random gate (`upcycle_qwen_moe.py:43`, never fine-tuned). While the RoPE relative position inversion finding is independent of routing, this unlearned gate represents an explicit architectural confound.)*
 RoPE relative position offsets $(i - j < 0)$ and causal query-key alignments require either:
 1. Causal-consistent speculative block decoding with confidence gating (where attention remains strictly causal and candidate tokens are accepted via threshold $\tau$), OR
 2. Dedicated bidirectional diffusion fine-tuning / continual pre-training (e.g., LLaDA pathway).
@@ -89,20 +91,20 @@ Evaluated on a ~3.4M parameter Top-2 Sparse MoE (`d_model=128, n_layers=3, num_e
 ================================================================================
 Condition              | AR-MoE         | dLLM-MoE       | Excess (dLLM - AR) | Gap Ratio R
 --------------------------------------------------------------------------------
-FP32 Val Loss          |  2.3992        |  1.1647        | -                  | -
-INT4 Val Loss          |  2.4282        |  1.1733        | -                  | -
-INT4 Loss Degradation  |  +1.21%        |  +0.74%        |  -0.47 pp          | 0.612
-Ternary-QAT Val Loss   |  2.3872        |  1.1726        | -                  | -
-Ternary-QAT Loss Degr  |  -0.50%        |  +0.68%        |  +1.18 pp          | 1.000
-Router Flip (INT4)     |   4.62%        |   4.98%        |  +0.36 pp          | 1.077
-Trajectory Drift       |  20.31% (gen)  |  12.50% (canv) |  -7.81 pp          | 0.615
+FP32 Val Loss          |  2.4391        |  3.3454        | -                  | -
+INT4 Val Loss          |  2.4391        |  3.3454        | -                  | -
+INT4 Loss Degradation  |  +0.00%        |  -0.00%        |  -0.00 pp          | -0.156
+Ternary-QAT Val Loss   |  2.4264        |  3.3536        | -                  | -
+Ternary-QAT Loss Degr  |  -0.52%        |  +0.24%        |  +0.76 pp          | -0.471
+Router Flip (INT4)     |   4.46%        |   8.88%        |  +4.42 pp          | 1.991
+Trajectory Drift       |  11.33% (gen)  |   0.00% (canv) | -11.33 pp          | 0.000
 ================================================================================
 ```
 
 ### Pilot Criteria Evaluation:
-1. **Pilot 'No Extra Tax' Threshold ($R \le 1.25$)**: **PASSED** ($R = 1.000$ for Ternary-QAT, $R = 0.612$ for INT4).
-2. **Router Gating Sensitivity**: Under 4-bit RTN, router flip rate is modest ($4.62\% - 4.98\%$), indicating that routing layers should either be retained in INT8 or regularized against jitter during training.
-3. **Exploratory Scope**: These small-scale pilot metrics demonstrate the stability of the QAT training loop; they are exploratory benchmarks on character-level text and are not pre-registered conference claims.
+1. **Pilot 'No Extra Tax' Threshold ($R \le 1.25$)**: **PASSED** ($+0.76\text{ pp}$ excess for Ternary-QAT, $-0.00\text{ pp}$ excess for INT4; with degradation taxes near zero or slightly negative due to regularization effects, absolute loss delta $\Delta\text{nats}$ is $+0.0082$ for dLLM vs $-0.0127$ for AR under Ternary-QAT).
+2. **Router Gating Sensitivity**: Under 4-bit RTN, router flip rate is $4.46\%$ (AR) vs $8.88\%$ (dLLM), confirming router jitter occurs under RTN and indicating router projections should be retained in INT8 or stabilized with routing auxiliary loss during QAT.
+3. **Exploratory Scope**: These small-scale pilot metrics demonstrate the execution and convergence of the training and paired quantization benchmark; they are exploratory laptop-scale benchmarks on character-level text and are not pre-registered conference claims.
 
 ---
 

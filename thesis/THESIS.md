@@ -148,7 +148,7 @@ An exploratory research track investigating memory-bandwidth reduction and exper
 
 ### 12.3 Causal Consistency & Jacobi Speculative Decoding
 - Iterative block argmax updates with causal attention masks are mathematically equivalent to **Jacobi parallel speculative decoding** converging toward the causal AR greedy rollout.
-- With confidence thresholding ($\tau = 0.85$), speculative block decoding achieves **100% exact autoregressive match** on `Qwen2.5-0.5B`, eliminating the hallucination mode of unadapted decoding.
+- Speculative decoding reproduces greedy AR output by construction; tested on `Qwen2.5-0.5B`, it serves as a correctness verification ($57$ passes for $32$ tokens, $0.60$ tok/pass). Critically, reproducing AR rollout means it reproduces the *quantized* AR rollout on quantized weights, offering zero quantization-drift attenuation.
 
 ### 12.4 Scaled Roadmap & Compute Ask
 - **Stage 1**: Sanity audit and double-noise disentanglement on a trained MoE checkpoint (`Qwen1.5-MoE-A2.7B`).

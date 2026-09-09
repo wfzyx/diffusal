@@ -294,7 +294,7 @@ def measure_router_flips(base_model, quant_model, eval_batches, mask_token_id, i
             _, b_routes = base_model(x_in, record_routing=True)
             _, q_routes = quant_model(x_in, record_routing=True)
             
-            for b_idx, q_idx in zip(b_routes, q_routes):
+            for (_, b_idx), (_, q_idx) in zip(b_routes, q_routes):
                 mismatches = 0
                 total = b_idx.shape[0] * b_idx.shape[1]
                 for b in range(b_idx.shape[0]):
