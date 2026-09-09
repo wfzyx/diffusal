@@ -2,6 +2,8 @@
 
 Audited across both arms (dLLM vs. AR control) under the frozen `configs/exp2-pilot.yaml` recipe.
 
+> **Provenance Notice**: Model parameter counts and ternarization fractions below are computed from the exact structural layer decomposition of the `bd3lms` backbone under `qat.py` (checkpoints are gitignored and not stored in the repository clone).
+
 ## Side-by-Side Coverage Audit
 
 | Quantity | Discrete Diffusion (dLLM) | Autoregressive Control (AR) | Delta / Asymmetry |
