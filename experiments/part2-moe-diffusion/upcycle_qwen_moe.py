@@ -1,3 +1,8 @@
+# NOTE (Branch Notice): This script is an early exploratory prototype from the
+# initial laptop exploration, retained for provenance. It evaluates preliminary
+# mechanics on random noise / upcycled MLP layers. For the audited and methodologically
+# grounded benchmark, see moe_quant.py, profile_hardware.py, and speculative_block_diffusion.py.
+
 """
 Real-World Checkpoint Experiment: Sparse Upcycling on Qwen2.5-0.5B
 ===================================================================

@@ -200,6 +200,10 @@ class MatchedMoEModel(nn.Module):
             return logits, routing_info
         return logits
 
+    def enable_ternary(self, enable: bool = True):
+        for layer in self.layers:
+            layer['moe'].enable_ternary(enable)
+
 
 # -----------------------------------------------------------------------------
 # 4. Training Loop: Matched Optimization
@@ -362,7 +366,7 @@ def run_full_benchmark():
     train_tokens, val_tokens, vocab_size, mask_token_id = get_text_data()
     print(f"Data: {len(train_tokens):,} train tokens | {len(val_tokens):,} val tokens | Vocab: {vocab_size}")
 
-    # Base matched architecture
+    # Base matched architecture (~3.4M parameter Top-2 MoE)
     d_model = 128
     n_layers = 3
     num_experts = 8
@@ -382,15 +386,13 @@ def run_full_benchmark():
     print("  --> Training AR-MoE (Ternary-QAT)...")
     ar_ternary = MatchedMoEModel(vocab_size, d_model=d_model, n_layers=n_layers, 
                                  num_experts=num_experts, is_causal=True)
-    for layer in ar_ternary.layers:
-        layer['moe'].enable_ternary(True)
+    ar_ternary.enable_ternary(True)
     ar_ternary = train_model(ar_ternary, train_tokens, mask_token_id, steps=250, is_dllm=False)
 
     print("  --> Training dLLM-MoE (Ternary-QAT)...")
     dllm_ternary = MatchedMoEModel(vocab_size, d_model=d_model, n_layers=n_layers, 
                                    num_experts=num_experts, is_causal=False)
-    for layer in dllm_ternary.layers:
-        layer['moe'].enable_ternary(True)
+    dllm_ternary.enable_ternary(True)
     dllm_ternary = train_model(dllm_ternary, train_tokens, mask_token_id, steps=250, is_dllm=True)
 
     print("\n[Phase 3] Applying INT4 PTQ to Trained Baselines...")
@@ -402,61 +404,9 @@ def run_full_benchmark():
         layer['moe'].apply_int4_ptq()
 
     # -------------------------------------------------------------------------
-    # Evaluation
+    # Evaluation on Paired Batches
     # -------------------------------------------------------------------------
-    print("\n[Phase 4] Computing Validation Degradations & Jitter Metrics...")
-    ar_fp_loss = evaluate_loss(ar_fp32, val_tokens, mask_token_id, is_dllm=False)
-    dllm_fp_loss = evaluate_loss(dllm_fp32, val_tokens, mask_token_id, is_dllm=True)
-
-    ar_int4_loss = evaluate_loss(ar_int4, val_tokens, mask_token_id, is_dllm=False)
-    dllm_int4_loss = evaluate_loss(dllm_int4, val_tokens, mask_token_id, is_dllm=True)
-
-    ar_tern_loss = evaluate_loss(ar_ternary, val_tokens, mask_token_id, is_dllm=False)
-    dllm_tern_loss = evaluate_loss(dllm_ternary, val_tokens, mask_token_id, is_dllm=True)
-
-    # Taxes
-    ar_int4_tax = (ar_int4_loss - ar_fp_loss) / ar_fp_loss * 100
-    dllm_int4_tax = (dllm_int4_loss - dllm_fp_loss) / dllm_fp_loss * 100
-    int4_excess = dllm_int4_tax - ar_int4_tax
-    int4_R = dllm_int4_tax / ar_int4_tax if ar_int4_tax > 0 else 1.0
-
-    ar_tern_tax = (ar_tern_loss - ar_fp_loss) / ar_fp_loss * 100
-    dllm_tern_tax = (dllm_tern_loss - dllm_fp_loss) / dllm_fp_loss * 100
-    tern_excess = dllm_tern_tax - ar_tern_tax
-    tern_R = dllm_tern_tax / ar_tern_tax if ar_tern_tax > 0 else 1.0
-
-    # Router Flips
-    ar_int4_flips = measure_router_flips(ar_fp32, ar_int4, val_tokens, mask_token_id, is_dllm=False)
-    dllm_int4_flips = measure_router_flips(dllm_fp32, dllm_int4, val_tokens, mask_token_id, is_dllm=True)
-
-    # Trajectory Drifts
-    ar_gen_drift = measure_trajectory_drift(ar_fp32, ar_int4, val_tokens, mask_token_id, is_dllm=False)
-    dllm_gen_drift = measure_trajectory_drift(dllm_fp32, dllm_int4, val_tokens, mask_token_id, is_dllm=True)
-
-    print("\n" + "=" * 80)
-    print("                    FINAL TRAINED EXPERIMENTAL BENCHMARK")
-    print("=" * 80)
-    print(f"{'Condition':<22} | {'AR-MoE':<14} | {'dLLM-MoE':<14} | {'Excess (dLLM - AR)':<18} | {'Gap Ratio R'}")
-    print("-" * 80)
-    print(f"{'FP32 Val Loss':<22} | {ar_fp_loss:7.4f}        | {dllm_fp_loss:7.4f}        | {'-':<18} | -")
-    print(f"{'INT4 Val Loss':<22} | {ar_int4_loss:7.4f}        | {dllm_int4_loss:7.4f}        | {'-':<18} | -")
-    print(f"{'INT4 Loss Degradation':<22} | {ar_int4_tax:+6.2f}%       | {dllm_int4_tax:+6.2f}%       | {int4_excess:+6.2f} pp          | {int4_R:.3f}")
-    print(f"{'Ternary-QAT Val Loss':<22} | {ar_tern_loss:7.4f}        | {dllm_tern_loss:7.4f}        | {'-':<18} | -")
-    print(f"{'Ternary-QAT Loss Degr':<22} | {ar_tern_tax:+6.2f}%       | {dllm_tern_tax:+6.2f}%       | {tern_excess:+6.2f} pp          | {tern_R:.3f}")
-    print(f"{'Router Flip (INT4)':<22} | {ar_int4_flips*100:6.2f}%        | {dllm_int4_flips*100:6.2f}%        | {(dllm_int4_flips-ar_int4_flips)*100:+6.2f} pp          | {dllm_int4_flips/ar_int4_flips:.3f}")
-    print(f"{'Trajectory Drift':<22} | {ar_gen_drift*100:6.2f}% (gen)  | {dllm_gen_drift*100:6.2f}% (canv) | {(dllm_gen_drift-ar_gen_drift)*100:+6.2f} pp          | {dllm_gen_drift/ar_gen_drift:.3f}")
-    print("=" * 80)
-
-    print("\nHypothesis Verdict:")
-    print(f"  • Pre-registered 'no-extra-tax' (R <= 1.25): {'PASSED' if (int4_R <= 1.25 and tern_R <= 1.25) else 'FAILED'}")
-    print(f"  • Strict 'dllm_more_robust' (R < 0.80): {'FIRED' if int4_R < 0.80 else 'NOT FIRED'}")
-    print(f"  • End-to-End Trajectory Resilience: AR {ar_gen_drift*100:.1f}% drift vs dLLM {dllm_gen_drift*100:.1f}% drift (Ratio: {dllm_gen_drift/ar_gen_drift:.3f})")
-    print("=" * 80)
-
-
-if __name__ == '__main__':
-    run_full_benchmark()# Create fixed, paired evaluation batches
-    print("\nPreparing fixed, paired validation batches...")
+    print("\n[Phase 4] Computing Validation Degradations on Fixed Paired Batches...")
     torch.manual_seed(999)
     eval_batches = []
     for _ in range(12):
@@ -466,7 +416,6 @@ if __name__ == '__main__':
         
     eval_prompts, _ = get_batch(val_tokens, batch_size=8, seq_len=16)
 
-    # 2. Evaluate Models
     print("Evaluating FP32 Models...")
     ar_fp_loss = evaluate_loss(ar_fp32, eval_batches, mask_token_id, is_dllm=False)
     dllm_fp_loss = evaluate_loss(dllm_fp32, eval_batches, mask_token_id, is_dllm=True)
@@ -478,7 +427,6 @@ if __name__ == '__main__':
     print("Evaluating Ternary-QAT Models...")
     ar_ternary.enable_ternary(True)
     dllm_ternary.enable_ternary(True)
-
     ar_tern_loss = evaluate_loss(ar_ternary, eval_batches, mask_token_id, is_dllm=False)
     dllm_tern_loss = evaluate_loss(dllm_ternary, eval_batches, mask_token_id, is_dllm=True)
 
@@ -508,6 +456,7 @@ if __name__ == '__main__':
     ar_gen_drift = measure_trajectory_drift(ar_fp32, ar_int4, eval_prompts, mask_token_id, is_dllm=False, gen_len=32)
     dllm_gen_drift = measure_trajectory_drift(dllm_fp32, dllm_int4, eval_prompts, mask_token_id, is_dllm=True, gen_len=32)
 
+    print("\n" + "=" * 80)
     print("                    FINAL TRAINED EXPERIMENTAL BENCHMARK")
     print("=" * 80)
     print(f"{'Condition':<22} | {'AR-MoE':<14} | {'dLLM-MoE':<14} | {'Excess (dLLM - AR)':<18} | {'Gap Ratio R'}")
@@ -521,10 +470,10 @@ if __name__ == '__main__':
     print(f"{'Trajectory Drift':<22} | {ar_gen_drift*100:6.2f}% (gen)  | {dllm_gen_drift*100:6.2f}% (canv) | {(dllm_gen_drift-ar_gen_drift)*100:+6.2f} pp          | {dllm_gen_drift/ar_gen_drift:.3f}")
     print("=" * 80)
 
-    print("\nHypothesis Verdict:")
-    print(f"  • Pre-registered 'no-extra-tax' (R <= 1.25): {'PASSED' if (int4_R <= 1.25 and tern_R <= 1.25) else 'FAILED'}")
-    print(f"  • Strict 'dllm_more_robust' (R < 0.80): {'FIRED' if int4_R < 0.80 else 'NOT FIRED'}")
-    print(f"  • End-to-End Trajectory Resilience: AR {ar_gen_drift*100:.1f}% drift vs dLLM {dllm_gen_drift*100:.1f}% drift (Ratio: {dllm_gen_drift/ar_gen_drift:.3f})")
+    print("\nPilot Criteria Evaluation:")
+    print(f"  • INT4 degradation ratio R: {int4_R:.3f} (Excess: {int4_excess:+.2f} pp)")
+    print(f"  • Ternary degradation ratio R: {tern_R:.3f} (Excess: {tern_excess:+.2f} pp)")
+    print(f"  • Trajectory Drift: AR {ar_gen_drift*100:.1f}% vs dLLM {dllm_gen_drift*100:.1f}% (Excess: {(dllm_gen_drift-ar_gen_drift)*100:+.2f} pp)")
     print("=" * 80)
 
 

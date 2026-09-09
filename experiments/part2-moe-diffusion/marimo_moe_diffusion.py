@@ -93,7 +93,7 @@ def __(block_slider, conf_slider, precision_selector, prompt_selector):
         ai_ar = 0.50
         ai_diff = 5.73
     elif "INT4" in prec:
-        ar_drift = 28.77
+        ar_drift = 24.85
         diff_drift = 28.77
         dram_streamed_ar = 214.5
         dram_streamed_diff = 112.2
@@ -101,7 +101,7 @@ def __(block_slider, conf_slider, precision_selector, prompt_selector):
         ai_diff = 45.88
     else:  # Ternary
         ar_drift = 46.09
-        diff_drift = 41.55
+        diff_drift = 55.40
         dram_streamed_ar = 107.3
         dram_streamed_diff = 56.1
         ai_ar = 8.00

@@ -1,10 +1,13 @@
 """
-Jacobi Speculative Parallel Block Decoding with Causal Consistency
-===========================================================================
-Fixes the RoPE relative position inversion (i - j < 0) that broke naive bidirectional unmasking.
-- Maintains causal position consistency (relative offsets >= 0) to preserve pre-trained Qwen representations.
-- Performs parallel candidate block generation (e.g. 16-32 tokens) with iterative confidence unmasking.
-- Verifies fluent English output on Qwen2.5-0.5B without semantic collapse.
+Un-Gated Causal Jacobi Block Update Probe (Exploratory Prototype)
+================================================================
+Investigates causal block iterative updating on pre-trained Qwen2.5-0.5B.
+- Maintains causal attention to avoid RoPE negative relative offset distortion.
+- EMPIRICAL FINDING: Because candidate positions are updated without confidence
+  thresholding (tau) or speculative verification, un-gated Jacobi block updates
+  cascade errors to downstream positions (resulting in repeated/degenerate text).
+- For the confidence-thresholded engine that guarantees 100% exact AR fluency,
+  see `speculative_block_diffusion.py`.
 """
 
 import sys

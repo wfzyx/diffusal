@@ -326,38 +326,5 @@ def profile_memory_bandwidth():
         print(f"{mode.upper():<18} | {'Block-Diffusion':<16} | {diff_passes:<8} | {diff_dram_bytes / (1024**2):7.1f} MB | {diff_flops / 1e9:6.2f}   | {diff_intensity:6.2f} FLOPs/B ({dram_reduction:.2f}x DRAM cut)")
         print("-" * 88)
 
-    # -------------------------------------------------------------------------
-    # Empirical Wall-Clock Latency Benchmark on Laptop
-    # -------------------------------------------------------------------------
-    print("\n[Benchmarking Empirical Wall-Clock Latency on Laptop CPU]...")
-    model.set_mode("fp32")
-    
-    # Warmup
-    _, _, _ = generate_pure_ar(model, prompt, gen_len=8)
-    _, _, _ = generate_block_diffusion(model, prompt, gen_len=8, block_size=8, steps_per_block=4)
-    
-    # Benchmark 64 tokens
-    _, ar_passes, ar_time = generate_pure_ar(model, prompt, gen_len=64)
-    _, diff_passes, diff_time = generate_block_diffusion(model, prompt, gen_len=64, block_size=32, steps_per_block=6)
-    
-    ar_tok_per_sec = 64 / ar_time
-    diff_tok_per_sec = 64 / diff_time
-    speedup = diff_tok_per_sec / ar_tok_per_sec
-
-    print("\n" + "=" * 82)
-    print("                    EMPIRICAL EXECUTION RESULTS (64 TOKENS)")
-    print("=" * 82)
-    print(f"  • Pure Autoregressive Generation:")
-    print(f"      - Forward passes:        {ar_passes} passes (1 pass / token)")
-    print(f"      - Latency:               {ar_time:.3f} seconds ({ar_tok_per_sec:.2f} tok/s)")
-    print(f"  • Semi-AR Block-Diffusion Hybrid:")
-    print(f"      - Forward passes:        {diff_passes} passes ({64/diff_passes:.1f} tokens / pass)")
-    print(f"      - Latency:               {diff_time:.3f} seconds ({diff_tok_per_sec:.2f} tok/s)")
-    net_dram_cut = (ar_passes * active_params) / (diff_passes * total_params)
-    print(f"      - Throughput Acceleration: {speedup:.2f}x faster")
-    print(f"      - Weight Streaming Passes: {ar_passes / diff_passes:.2f}x fewer passes ({ar_passes} vs {diff_passes})")
-    print(f"      - Net DRAM Traffic Cut:    {net_dram_cut:.2f}x less memory moved")
-    print("=" * 82)
-
 if __name__ == '__main__':
     profile_memory_bandwidth()
