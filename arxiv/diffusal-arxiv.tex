@@ -11,7 +11,7 @@
 \usepackage[hidelinks]{hyperref}
 \usepackage{xcolor}
 
-\setlist{itemsep=2pt, topsep=4pt}
+\setlist{itemsep=1pt, topsep=2pt}
 
 \newtheorem{theorem}{Theorem}
 \newtheorem{lemma}{Lemma}
@@ -70,7 +70,7 @@ Our answer to both is \textbf{no, diffusion pays no extra penalty---and on spars
 
 \paragraph{Extreme low-bit MoE quantization.} BitNet b1.58~\cite{bitnet} demonstrated competitive ternary scaling from $\sim$3B parameters upward. In Sparse MoEs, frameworks such as MoEQuant~\cite{moequant} and EAQuant~\cite{eaquant} seek to prevent router collapse under W4A4 and W2A4 regimes by optimizing expert-balanced calibration. Yet, all current MoE compression techniques operate within the autoregressive paradigm, where router misallocations inevitably compound down the KV-cache.
 
-\paragraph{Second-order Hessian quantization (GPTQ) in diffusion.} Post-training quantization for autoregressive Transformers was revolutionized by GPTQ~\cite{gptq}, which utilizes second-order inverse Hessian curvature updates ($\mathbf{H} = 2 \mathbf{X} \mathbf{X}^\top$) to compensate for weight rounding errors layer-by-layer. A common conjecture is that second-order Hessian methods are incompatible with diffusion models because diffusion activations vary across continuous timesteps $t \in [1, T]$. However, in causal-consistent block diffusion, historical context uses standard static KV caches (enabling direct GPTQ calibration), while candidate block activations can be calibrated across diffusion steps via Timestep-Averaged Hessian Accumulation. Crucially, our empirical results demonstrate that even \emph{without} second-order compensation (under pure round-to-nearest and naive ternary scaling), the bidirectional diffusion canvas inherently suppresses quantization-induced router drift, establishing a robust floor that second-order methods can build upon.
+\paragraph{Second-order quantization (GPTQ) in diffusion.} Post-training quantization for autoregressive Transformers was revolutionized by GPTQ~\cite{gptq}, which utilizes second-order inverse Hessian curvature updates ($\mathbf{H} = 2 \mathbf{X} \mathbf{X}^\top$) to compensate for weight rounding errors layer-by-layer. A common conjecture is that second-order Hessian methods are incompatible with diffusion models because diffusion activations vary across continuous timesteps $t \in [1, T]$. However, in causal-consistent block diffusion, historical context uses standard static KV caches (enabling direct GPTQ calibration), while candidate block activations can be calibrated across diffusion steps via Timestep-Averaged Hessian Accumulation. Crucially, our empirical results demonstrate that even \emph{without} second-order compensation (under pure round-to-nearest and naive ternary scaling), the bidirectional diffusion canvas inherently suppresses quantization-induced router drift, establishing a robust floor that second-order methods can build upon.
 
 \paragraph{AR-to-Diffusion adaptation.} Adapting causal models into diffusion decoders without retraining from scratch is an active frontier. DiffuLLaMA~\cite{diffullama} proved that pre-trained weights can be adapted with $<5\%$ continual pre-training data. FLUID~\cite{fluid} and Efficient-DLM~\cite{efficientdlm} introduced block-wise causal-consistent attention to reconcile causal pre-training with parallel block generation while reusing KV caches.
 
@@ -249,7 +249,7 @@ When converting pre-trained causal models to diffusion, zero-shot bidirectional 
 Decoding Method & Generation Output on \texttt{Qwen2.5-0.5B} \\
 \midrule
 Pre-trained AR & \emph{``The theory of general relativity explains that gravity is caused by the curvature of spacetime caused by the presence of mass...''} \\
-Naive Bidirectional & \emph{``The theory of general relativity explains that gravity is  00 人  1 的 |Human\# \#0Human0$<$$\backslash$  的 ''} \\
+Naive Bidirectional & \emph{``The theory of general relativity explains that gravity is  00 [CJK]  1 [CJK] |Human\# \#0Human0$<$$\backslash$  [CJK] ''} \\
 Causal-Consistent Block & \emph{``The theory of general relativity explains that gravity is caused by the curvature of spacetime caused by the presence of mass...''} \\
 \bottomrule
 \end{tabular}
@@ -273,6 +273,7 @@ The empirical validation presented here outlines an actionable engineering pathw
 
 At matched scale, data, tokenizer, and training recipe, discrete masked diffusion language models absorb extreme weight quantization and routing gate noise significantly better than autoregressive decoders. On dense models, dLLMs exhibit a $2\times$ degradation advantage at INT4 and zero extra ternary tax. On Sparse MoEs, diffusion canvas refinement suppresses cascading router flips, reducing ternary trajectory drift by up to $-59.38$\,pp. Combined with a $106.7\times$ reduction in DRAM traffic and causal-consistent block decoding, discrete diffusion provides the missing architectural foundation for deploying extreme sub-2-bit MoEs on bandwidth-constrained hardware.
 
+{\small\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
 \begin{thebibliography}{99}
 \bibitem{gptq} E. Frantar, S. Ashkboos, T. Hoefler, D. Alistarh. \emph{GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers}. ICLR (2023).
 \bibitem{bitnet} S. Ma et al. \emph{The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits} (BitNet b1.58). arXiv:2402.17764 (2024).
@@ -291,5 +292,6 @@ At matched scale, data, tokenizer, and training recipe, discrete masked diffusio
 \bibitem{qdiffusion} X. Li et al. \emph{Q-Diffusion: Quantizing Diffusion Models}. arXiv:2302.04304 (2023).
 \bibitem{tdq} J. So et al. \emph{Temporal Dynamic Quantization for Diffusion Models} (TDQ). arXiv:2306.02316 (2023).
 \end{thebibliography}
+}
 
 \end{document}
