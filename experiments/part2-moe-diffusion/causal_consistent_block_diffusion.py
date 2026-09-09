@@ -1,5 +1,5 @@
 """
-SOTA Causal-Consistent Block-Diffusion (FLUID / Efficient-DLM Architecture)
+Jacobi Speculative Parallel Block Decoding with Causal Consistency
 ===========================================================================
 Fixes the RoPE relative position inversion (i - j < 0) that broke naive bidirectional unmasking.
 - Maintains causal position consistency (relative offsets >= 0) to preserve pre-trained Qwen representations.
@@ -24,7 +24,7 @@ torch.manual_seed(42)
 
 def generate_causal_consistent_block(model, tokenizer, prompt_text, gen_tokens=32, block_size=16, steps_per_block=4):
     """
-    FLUID / Efficient-DLM Causal-Consistent Block Decoding:
+    Causal-Consistent Jacobi Speculative Block Decoding (Song et al. 2021; Leviathan et al. 2023):
     - History (< t): Standard causal KV cache.
     - Candidate Block [t, t+B-1]:
         * Maintains strictly causal attention mask internally:
@@ -95,7 +95,7 @@ def generate_causal_consistent_block(model, tokenizer, prompt_text, gen_tokens=3
 def run_test():
     print("=" * 80)
     print("  TESTING SOTA CAUSAL-CONSISTENT BLOCK-DIFFUSION ON QWEN2.5-0.5B")
-    print("  Framework: FLUID (ACL 2025) / Efficient-DLM (2025/2026)")
+    print("  Framework: Jacobi Speculative Parallel Decoding (Causal-Consistent)")
     print("=" * 80)
 
     model_id = "Qwen/Qwen2.5-0.5B"
