@@ -86,14 +86,16 @@ and [the thesis program](thesis/THESIS.md):
    diffusion model via AR-to-diffusion conversion at ~2–3B, where BitNet says
    ternary reaches parity.
 
-Every experiment carries pre-registered thresholds and kill criteria
+Every core Track A experiment carries pre-registered thresholds and kill criteria
 ([configs/](configs/)), frozen and tagged before runs; amendments are new
-tagged commits with justification.
+tagged commits with justification. Exploratory investigations (such as speculative
+block decoding and MoE probing in the `disperser` branch) are explicitly scoped
+as exploratory prototypes outside the pre-registered core.
 
 ## What this is not
 
 Not "a 25B ternary dLLM in 6 GB" — activations, logits, and buffers dominate
-at small scale; in the current QAT checkpoint only 21.5% of model-state
+at small scale; in the current QAT checkpoint only 21.5% of dLLM (19.6% of AR) model-state
 parameters are ternarized, for an idealized weight-only reduction of 1.23×.
 Not a claim about 7B+ models. Not calibrated PTQ — naive RTN by design, so the
 AR control carries the comparison.

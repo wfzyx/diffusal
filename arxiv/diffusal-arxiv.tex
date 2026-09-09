@@ -5,293 +5,202 @@
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 \usepackage{microtype}
-\usepackage{amsmath,amssymb,amsthm}
+\usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage[hidelinks]{hyperref}
 \usepackage{xcolor}
 
-\setlist{itemsep=1pt, topsep=2pt}
-
-\newtheorem{theorem}{Theorem}
-\newtheorem{lemma}{Lemma}
+\setlist{itemsep=2pt, topsep=4pt}
 
 \title{\textbf{Masked Diffusion Language Models Absorb Extreme Weight\\
-Quantization and Routing Noise in Sparse Mixture-of-Experts}\thanks{Code, model checkpoints, and interactive reproduction notebooks are available at \url{https://github.com/wfzyx/diffusal}.}}
+Quantization Better Than Autoregressive Models at Matched Scale}\thanks{Code, model configs, checkpoint SHA-256 hashes, and pre-registration tags available at \url{https://github.com/wfzyx/diffusal}.}}
 \author{Victor Hugo Panisa Bezerra\\\texttt{victor.panisa@gmail.com}}
-\date{September 2026}
+\date{July 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We investigate whether discrete masked diffusion language models (dLLMs) tolerate extreme weight quantization and routing gate noise better than matched autoregressive (AR) decoders across dense and sparse Mixture-of-Experts (MoE) architectures. Extreme quantization---sub-2-bit, ternary $\{-1, 0, +1\}$ (BitNet b1.58), and aggressive INT4---fails across all architectures when evaluated in isolation; hence, we evaluate strictly against matched controls at identical precision, scale, tokenizer, and data, isolating the \textbf{excess degradation} of dLLMs over their AR twins. 
-
-Our findings establish four interconnected results: 
-\textbf{(1) Dense PTQ at 130M:} MDLM-owt degrades $+9$--$21\%$ in validation likelihood under INT4 compared to $+25$--$32\%$ for its matched AR twin ($-11$ to $-16$\,pp excess), corroborated by a $-50.8$\,pp generative perplexity advantage under a GPT-2-large oracle.
-\textbf{(2) Native Ternary QAT at 7M:} Across 12 scratch-trained dense models, dLLMs pay zero extra ternary tax ($R = 0.890$, 95\% CI $[0.872, 0.908]$).
-\textbf{(3) Sparse MoE Quantization Resilience:} Extending the matched paradigm to Top-2 Sparse MoE backbones, dLLMs achieve a gap ratio of $R = 0.615$, firing the pre-registered \texttt{dllm\_more\_robust} criterion. On production MoE weights (\texttt{qwen3-moe-tiny}, 24 layers, 16 experts), a 64-prompt statistical grid ($N = 64, df = 63$) confirms that diffusion canvas decoding dampens trajectory corruption ($-4.54$\,pp mean excess, with variance reduced from $\pm 8.51\%$ in AR to $\pm 6.40\%$ in dLLM), while single-prompt stress tests show up to a $-59.38$\,pp reduction in ternary rollout drift.
-\textbf{(4) Hardware Memory Physics \& Adaptation:} Profiling reveals that block-diffusion decoding with ternary experts breaks the memory-bound $B=1$ streaming bottleneck, elevating arithmetic intensity from $0.50$\,FLOPs/Byte to a compute-saturated $53.33$\,FLOPs/Byte and shrinking total DRAM data movement by $106.7\times$. We further identify that zero-shot bidirectional mask-dropping fails on pre-trained causal models due to Rotary Position Embedding (RoPE) relative-distance inversion ($i - j < 0$), and demonstrate that causal-consistent block decoding recovers $100\%$ exact word-for-word generation fidelity on pre-trained Qwen weights. 
-
-Crucially, we address the question of whether diffusion models' superior relative quantization tolerance holds value if diffusion initiates from lower unquantized quality per parameter: under causal-consistent block unmasking, our diffusion model initializes with \emph{exact zero-shot parity} ($100\%$ generation identity) to the unquantized autoregressive model. When subjected to extreme ternary quantization, autoregressive decoding undergoes catastrophic compounding trajectory collapse (up to $75.0\%$ token corruption), whereas diffusion canvas decoding preserves $84.4\%$ trajectory fidelity, demonstrating that error damping translates directly into superior \emph{absolute generation quality} post-quantization.
-
-Together, these results provide theoretical and empirical foundations for deploying extreme sub-2-bit compressed MoEs (such as Bonsai/ternary Qwen-Flash-Next) on commodity, bandwidth-constrained hardware.
+We ask whether masked diffusion language models (dLLMs) tolerate extreme weight quantization better than autoregressive (AR) models of matched scale, data, tokenizer, and training recipe. The question is only meaningful against a matched control: extreme post-training quantization (PTQ) fails on \emph{every} architecture, so a dLLM failing in isolation says nothing about diffusion. We therefore report only the \textbf{excess} degradation of the dLLM over its AR twin. In two matched setups, the dLLM is the more robust model. \textbf{(1) Post-training quantization at 130M:} MDLM-owt and the same release's AR baseline---same authors, data, scale, codebase---are quantized identically; at INT4 the AR model degrades $+25$--$32\%$ in validation likelihood while the dLLM degrades only $+9$--$21\%$, an excess of \textbf{$-11$ to $-16$ percentage points}, unanimous across PTB / Wikitext103 / LAMBADA. A generative anchor (64 samples/condition, GPT-2-large oracle) corroborates: AR generated-text perplexity worsens $+96.2\%$ at INT4 versus $+45.4\%$ for the dLLM ($-50.8$pp excess), ruling out a likelihood-only artifact. \textbf{(2) Native ternary QAT at 7M:} twelve models trained from scratch (AR/dLLM $\times$ FP16/ternary-QAT $\times$ three seeds) give a geometric-mean gap ratio $R = 0.890$, 95\% CI $[0.872, 0.908]$: the dLLM pays \emph{no extra} ternary tax, though the stricter ``materially better'' criterion (upper CI $< 0.80$) does not fire. We also report two negative mechanism probes that reject the tempting ``token commitment absorbs errors'' story: changing eight fixed tokens propagates to $\sim$66\% of downstream positions under commit-and-freeze (FP16 and ternary statistically indistinguishable), and a post-hoc revisable retrofit reaches $\sim$98\%. The robustness is real and replicated; the obvious explanation for it is not supported. We release all configs, checkpoint hashes, and pre-registrations. This paper makes no claim about absolute dLLM quality, scale transfer beyond the tested points, deployment economics, or a mechanism.
 \end{abstract}
 
 \section{Introduction}
 
-Extreme weight quantization---INT4 and below, down to ternary $\{-1, 0, +1\}$ (BitNet b1.58~\cite{bitnet})---is the primary lever for compressing large language models into commodity memory budgets. However, standard autoregressive (AR) decoders face two fundamental physical barriers when scaled:
-\begin{enumerate}
-\item \textbf{The $B=1$ Memory-Bandwidth Bottleneck:} Autoregressive generation emits one scalar token per forward pass, forcing the entire active parameter state to be streamed across memory buses for minimal arithmetic work ($\sim$1.5 FLOPs/Byte).
-\item \textbf{The Compounding Error Cascade:} Autoregressive conditioning is strictly causal and non-linear. In dense models, sub-threshold weight perturbations drift downstream representations; in Sparse Mixture-of-Experts (MoE) architectures, quantization noise on routing gates induces discrete top-$k$ expert misallocations that corrupt the key-value (KV) cache and trigger runaway generative failure.
-\end{enumerate}
+Extreme weight quantization---INT4 and below, down to ternary $\{-1, 0, +1\}$ (BitNet b1.58~\cite{bitnet})---is the main lever for shrinking LLM memory, and autoregressive (AR) decoders are the default target. Masked diffusion language models (MDLM~\cite{mdlm}, LLaDA~\cite{llada}, and block-diffusion variants) generate by iteratively refining a token canvas rather than emitting strictly left to right, and it is not known whether that different computation makes them more or less fragile under aggressive quantization.
 
-Discrete masked diffusion language models (MDLM~\cite{mdlm}, LLaDA~\cite{llada}) invert this dynamic by generating via iterative parallel canvas refinement. While continuous diffusion quantization has been explored in image domains~\cite{ptq4dm,qdiffusion,tdq}, discrete text diffusion introduces discrete argmax commitment steps with no continuous counterpart. Prior diffusion quantization benchmarks (such as DLLMQuant~\cite{dllmquant} and Quant-dLLM~\cite{quantdllm}) evaluate models in isolation and restrict their scope to dense networks, leaving the interaction between \emph{discrete diffusion} and \emph{sparse expert routing} completely unexplored.
-
-This paper answers two concrete questions:
-\begin{quote}
-\emph{1. At matched scale, data, tokenizer, and recipe, does extreme quantization degrade a dLLM more than an AR model?} \\
-\emph{2. Does discrete diffusion canvas refinement shield Sparse MoEs from catastrophic router divergence and break the memory-bandwidth bottleneck?}
-\end{quote}
-
-Our answer to both is \textbf{no, diffusion pays no extra penalty---and on sparse MoE architectures under aggressive quantization, dLLMs are decisively more robust}.
+This paper isolates one comparison and answers it cleanly: \emph{at matched scale, data, tokenizer, and recipe, does extreme weight quantization degrade a dLLM more than an AR model?} Our answer, at the two scales we can afford to control confound-free, is \textbf{no---and at INT4 the dLLM is clearly more robust}. We are explicit about what this does and does not establish (\S\ref{sec:limitations}).
 
 \paragraph{Contributions.}
 \begin{enumerate}
-\item \textbf{Dense Matched Control (130M \& 7M):} We demonstrate that at INT4, dLLMs absorb weight noise roughly $2\times$ better than matched AR twins across three validation corpora ($-11$ to $-16$\,pp excess) and generative oracles ($-50.8$\,pp excess). Native ternary QAT across three seeds confirms zero extra diffusion tax ($R = 0.890$).
-\item \textbf{Theoretical Formulation of MoE Quantization Dynamics:} We formalize the double-noise model of quantized MoEs (intra-expert perturbation vs.\ discrete gating discontinuity) and prove why AR decoders suffer compounding exponential drift while dLLMs attenuate routing errors by $\mathcal{O}(1/L)$ across the bidirectional canvas.
-\item \textbf{Empirical MoE Quantization Proof:} On matched scratch-trained MoE pairs, dLLMs achieve a gap ratio $R = 0.615$ on trajectory stability. On production weights (\texttt{qwen3-moe-tiny}, 24 layers, 16 experts), a 64-prompt statistical grid ($N=64$) shows diffusion canvas decoding consistently suppresses rollout divergence, reducing ternary drift variance by $25\%$ and cutting drift by up to $-59.38$\,pp in high-divergence regimes.
-\item \textbf{Hardware Memory Physics \& RoPE Inversion Analysis:} We show that ternary block-diffusion achieves $53.33$\,FLOPs/Byte ($106.7\times$ less data movement). We diagnose why zero-shot bidirectional unmasking fails on pre-trained causal models (RoPE negative-offset mismatch) and prove that causal-consistent block decoding restores $100\%$ exact generation fidelity on real Qwen weights.
+\item A matched 130M INT4 PTQ result showing the dLLM absorbs $\sim$2$\times$ less degradation than its AR twin, unanimous across three datasets and corroborated by a generative anchor (\S\ref{sec:ptq}--\ref{sec:anchor}).
+\item A three-seed native ternary-QAT result at 7M showing no extra diffusion tax, $R = 0.890$ (\S\ref{sec:qat}).
+\item Two honest negative mechanism probes that reject ``commitment $=$ error absorption'' (\S\ref{sec:mechanism}).
+\item A full reproducibility release: configs, checkpoint hashes, pre-registrations.
 \end{enumerate}
 
 \section{Related Work}
 
-\paragraph{Quantization of diffusion models.} Post-training quantization for continuous diffusion (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}) established timestep-dependent calibration. DLLMQuant~\cite{dllmquant} and Quant-dLLM~\cite{quantdllm} adapted PTQ to discrete masked diffusion using timestep-aligned calibration and adaptive bit allocation. However, all existing diffusion quantization literature is restricted to \emph{dense} architectures and reports unnormalized degradations without matched causal controls.
+\paragraph{Quantization of diffusion and second-order methods.} Timestep-aware quantization for \emph{continuous image} diffusion (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}) established that quantization error accumulates non-uniformly across denoising steps. In autoregressive Transformers, post-training quantization was revolutionized by second-order inverse Hessian methods such as GPTQ~\cite{gptq}. Our setting is discrete \emph{text} diffusion, where each step involves an argmax commitment with no continuous analogue. DLLMQuant~\cite{dllmquant} and Quant-dLLM~\cite{quantdllm} study PTQ for discrete diffusion LLMs; we differ by strictly evaluating against matched autoregressive controls to isolate diffusion-specific excess rather than isolated model degradation.
 
-\paragraph{Extreme low-bit MoE quantization.} BitNet b1.58~\cite{bitnet} demonstrated competitive ternary scaling from $\sim$3B parameters upward. In Sparse MoEs, frameworks such as MoEQuant~\cite{moequant} and EAQuant~\cite{eaquant} seek to prevent router collapse under W4A4 and W2A4 regimes by optimizing expert-balanced calibration. Yet, all current MoE compression techniques operate within the autoregressive paradigm, where router misallocations inevitably compound down the KV-cache.
+\paragraph{Low-bit LLMs.} BitNet b1.58~\cite{bitnet} argues native ternary training is competitive from $\sim$3B parameters upward; below that, ternary underperforms FP16 \emph{for reasons unrelated to diffusion}. This is exactly why our QAT result reports a gap-of-gaps, not an absolute number.
 
-\paragraph{Second-order quantization (GPTQ) in diffusion.} Post-training quantization for autoregressive Transformers was revolutionized by GPTQ~\cite{gptq}, which utilizes second-order inverse Hessian curvature updates ($\mathbf{H} = 2 \mathbf{X} \mathbf{X}^\top$) to compensate for weight rounding errors layer-by-layer. A common conjecture is that second-order Hessian methods are incompatible with diffusion models because diffusion activations vary across continuous timesteps $t \in [1, T]$. However, in causal-consistent block diffusion, historical context uses standard static KV caches (enabling direct GPTQ calibration), while candidate block activations can be calibrated across diffusion steps via Timestep-Averaged Hessian Accumulation. Crucially, our empirical results demonstrate that even \emph{without} second-order compensation (under pure round-to-nearest and naive ternary scaling), the bidirectional diffusion canvas inherently suppresses quantization-induced router drift, establishing a robust floor that second-order methods can build upon.
+\paragraph{Masked diffusion LMs and samplers.} MDLM~\cite{mdlm} and LLaDA~\cite{llada} make iterative text denoising a real compression target. We note (and use) that the common ``remasking''-named samplers of LLaDA and Dream are in fact commit-and-freeze---LLaDA's low-confidence mode assigns $-\infty$ to unmasked positions, so a committed token never re-enters play. Genuine remasking exists as an inference-time retrofit (ReMDM~\cite{remdm}). Sampler family is tracked with every trajectory claim.
 
-\paragraph{AR-to-Diffusion adaptation.} Adapting causal models into diffusion decoders without retraining from scratch is an active frontier. DiffuLLaMA~\cite{diffullama} proved that pre-trained weights can be adapted with $<5\%$ continual pre-training data. FLUID~\cite{fluid} and Efficient-DLM~\cite{efficientdlm} introduced block-wise causal-consistent attention to reconcile causal pre-training with parallel block generation while reusing KV caches.
+\section{Setup}
 
-\section{Theoretical Framework: Error Propagation in MoEs}
-\label{sec:theory}
-
-\subsection{The Double-Noise Model in Quantized MoEs}
-Let an MoE layer comprise $E$ experts $\{f_e\}_{e=1}^E$ and gating matrix $W_g \in \mathbb{R}^{d \times E}$. For input $h_t \in \mathbb{R}^d$, top-$k$ routing selects active expert indices $\mathcal{T}(h_t) = \text{Top-}k(h_t W_g)$. Under weight quantization (INT4 or BitNet ternary), perturbations affect both expert weights $W_e \to \hat{W}_e = W_e + \Delta W_e$ and gating parameters $W_g \to \hat{W}_g = W_g + \Delta W_g$. 
-
-This introduces two distinct error sources:
-\begin{enumerate}
-\item \textbf{Intra-expert functional error:} $\delta f_e(h) \approx h \Delta W_e \sim \mathcal{O}(\sigma_w)$.
-\item \textbf{Inter-expert routing discontinuity:} An event where the active set flips:
-\[
-\mathcal{E}_{\text{flip}}(h_t) = \mathbb{I}\left(\text{Top-}k(h_t \hat{W}_g) \ne \text{Top-}k(h_t W_g)\right)
-\]
-Whenever $\mathcal{E}_{\text{flip}}$ occurs, the functional error undergoes a macroscopic jump:
-\[
-\|\hat{\text{MoE}}(h_t) - \text{MoE}(h_t)\| \approx \|f_{e_{\text{correct}}}(h_t) - f_{e_{\text{wrong}}}(h_t)\| \sim \mathcal{O}(1)
-\]
-\end{enumerate}
-
-\subsection{Compounding Autoregressive Drift vs. Diffusion Contraction}
-
-\begin{theorem}[Autoregressive Compounding Error Cascade]
-In an autoregressive decoder generating sequence $x_{1:T}$, hidden states evolve via a causal Markov chain: $h_t = \mathcal{F}_{\text{causal}}(x_{<t})$. If a routing flip occurs at token $t_0$, the state error propagates to all downstream positions $t > t_0$:
-\[
-\mathbb{E}[\|\Delta h_t\|^2] \ge (1 + \lambda) \mathbb{E}[\|\Delta h_{t-1}\|^2] + \mathbb{P}(\mathcal{E}_{\text{flip}} \mid \hat{h}_t) \cdot C_{\text{expert\_gap}}
-\]
-where $\lambda > 0$ represents average layer amplification. Consequently, the divergence in probability space scales exponentially:
-\[
-D_{\text{KL}}\left(p_\theta(x_{1:T}) \,\|\, p_{\hat{\theta}}(x_{1:T})\right) = \Omega\left(e^{\kappa T} \cdot \sigma_g^2\right)
-\]
-\end{theorem}
-
-\begin{theorem}[Discrete Diffusion Receptive Field Damping]
-In a masked diffusion canvas of length $L$, tokens at step $s$ attend bidirectionally. Under normalized softmax attention with Lipschitz constant $\gamma_{\text{attn}}$, the perturbation induced by a local router flip at position $i$ on any position $j \ne i$ is bounded by:
-\[
-\forall j \ne i: \quad \left\|\frac{\partial h_j^{(s)}}{\partial h_i^{(s)}}\right\| \le \frac{2 \gamma_{\text{attn}}}{L}
-\]
-Furthermore, confidence-ordered unmasking $i^* = \arg\max_i p_{\hat{\theta}}(x_i \mid x^{(s)})$ defers the commitment of tokens with suppressed confidence until future steps, preventing isolated router noise from dominating trajectory selection.
-\end{theorem}
-
-\section{Experimental Setup}
-
-\paragraph{Matched-control principle.} Quantization degradation is never evaluated for diffusion in isolation. We report exclusively the excess degradation over an identically trained AR twin:
+\paragraph{Matched-control principle.} Ternary/INT4 PTQ fails on all architectures, so we never report dLLM degradation alone. The evidence is always the excess
 \[
 \text{excess} = (\text{dLLM}_{\text{quant}} - \text{dLLM}_{\text{FP16}}) - (\text{AR}_{\text{quant}} - \text{AR}_{\text{FP16}})
 \]
+at identical precision, scale, data, tokenizer, and recipe.
 
-\paragraph{Matched cohorts and modern evaluation prompts.} While foundational exploratory studies frequently relied on legacy word-level corpora (such as the 1993 Penn Treebank~\cite{ptb}), contemporary LLM quantization requires validation on modern subword tokenizers and multifaceted technical domains. Accordingly, our experimental cohorts span both controlled synthetic setups and real-world production models:
-\begin{itemize}
-\item \textbf{Dense 130M PTQ Pair:} \texttt{kuleshov-group/mdlm-owt} vs.\ matched \texttt{ar.ckpt} (GPT-2 tokenizer, OpenWebText, evaluated at context length 1024).
-\item \textbf{Dense 7M QAT Pair:} 12 models scratch-trained on Wikitext-103: \{AR, dLLM\} $\times$ \{FP16, Ternary-QAT\} $\times$ \{seeds 1,2,3\}.
-\item \textbf{Sparse MoE Scratch Pair:} Matched Top-2 MoE models (8 experts, 3 layers, $d=128$, active parameters $\sim$1.9M) trained across \{FP32, INT4, Ternary-QAT\}.
-\item \textbf{Production MoE Checkpoint:} \texttt{PrimeIntellect/qwen3-moe-tiny} (24 layers, 16 experts per layer, Top-4 routing, $\sim$75M active params/token) using the modern Qwen 151,643-token BPE vocabulary.
-\item \textbf{64-Prompt Multi-Domain Statistical Grid:} $N=64$ technical prompts spanning 8 distinct contemporary domains (Distributed Systems / Consensus, General Relativity / Theoretical Physics, Real Analysis / Mathematics, Computer Architecture / Memory Physics, Macroeconomics, Molecular Biology / CRISPR, Logic, and Systems Programming).
-\end{itemize}
+\paragraph{PTQ pair (130M).} Primary dLLM: \texttt{kuleshov-group/mdlm-owt} ($\sim$130M non-embedding, GPT-2 tokenizer, OpenWebText). Matched AR control: the same release's \texttt{ar.ckpt}, trained by the same authors on the same data at the same scale in the same codebase. Both evaluated at \texttt{model.length=1024} with the repo's \texttt{data=openwebtext-split} config (tokenizer verified identical). Naive round-to-nearest PTQ at INT8, INT4, ternary. Evaluation runs through the bd3lms codebase (the mdlm repo's zero-shot eval cannot reproduce its own published numbers) with a numerically-validated flash-attention$\to$SDPA shim.
 
-\paragraph{Hardware Memory Profiling.} Evaluated on 19.6M total parameter Top-2 MoE backbones comparing sequential AR ($B=1$) against Semi-AR Block-Diffusion ($B=32$, $S=6$) across FP32, INT4, and BitNet b1.58 ternary precision.
+\paragraph{QAT pair (7M).} Twelve models trained from scratch on Wikitext103: \{AR, dLLM\} $\times$ \{FP16, ternary-QAT\} $\times$ \{seed 1,2,3\}. Tiny BD3LMS backbone ($\sim$7M non-embedding params), 6{,}000 steps, global batch 64. Ternarization is BitNet-style absmean with a straight-through estimator; embeddings, output head, norms, and biases are excluded (21.5\% of model-state params ternarized in dLLM vs.\ 19.6\% in AR due to dLLM timestep/adaLN projections---a slight asymmetry running against the dLLM; see \S\ref{sec:limitations}).
 
-\section{Empirical Results}
+\paragraph{Metrics.} PTQ: validation-likelihood degradation relative to each model's own FP16, plus a generative anchor (64 samples/condition, GPT-2-large oracle perplexity, with a unigram-entropy degeneracy guard). QAT: per-model ``tax'' $=$ ternary/FP16 relative degradation, summarized by the gap ratio $R = \text{dLLM-tax} / \text{AR-tax}$.
 
-\subsection{Dense Benchmarks: 130M PTQ and 7M Native QAT}
-\label{sec:dense_results}
+\paragraph{Pre-registration.} Kill criteria and the \texttt{dllm\_more\_robust} / \texttt{dllm\_better} thresholds were declared before runs (timestamped release tags \texttt{prereg-exp0-2026-07-16}, \texttt{prereg-exp2-pilot-2026-07-16.1}).
 
-Table~\ref{tab:dense_ptq} summarizes validation likelihood degradation for the 130M dense pair. At INT4, the dLLM degrades $+9$--$21\%$ versus $+25$--$32\%$ for the AR twin ($-11$ to $-16$\,pp excess). Generative anchor evaluation (64 samples/condition, GPT-2-large oracle) confirms that generated-text perplexity worsens $+96.2\%$ in AR vs.\ $+45.4\%$ in dLLM ($-50.8$\,pp excess), ruling out a likelihood metric artifact.
+\section{Results}
 
-\begin{table}[h]
-\centering
-\small
-\caption{Dense 130M PTQ and 7M QAT results from matched controls.}
-\label{tab:dense_ptq}
-\vspace{2mm}
-\begin{tabular}{lrrrr}
-\toprule
-Rung & AR Degradation & dLLM Degradation & Excess (dLLM $-$ AR) & Gap Ratio $R$ \\
-\midrule
-130M INT8 PTQ & $\sim 0\%$ & $+0.3$--$0.6\%$ & $\le +0.7$\,pp & -- \\
-130M INT4 PTQ & $+25$--$32\%$ & $+9$--$21\%$ & $\mathbf{-11}$ \textbf{to} $\mathbf{-16}$\,\textbf{pp} & $\sim 0.50$ \\
-130M INT4 Gen-Anchor & $+96.2\%$ & $+45.4\%$ & $\mathbf{-50.8}$\,\textbf{pp} & $0.47$ \\
-7M Ternary QAT (3 seeds) & $+21.75\%$ & $+8.28\%$ & -- & $0.890 \pm 0.018$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Post-training quantization at 130M (primary)}
+\label{sec:ptq}
 
-Under native ternary QAT at 7M (BitNet b1.58 absmean STE), the geometric-mean gap ratio across three seeds is $R = 0.890$, 95\% CI $[0.872, 0.908]$. The pre-registered no-extra-tax criterion ($R \le 1.25$) fires conclusively.
+Degradation relative to each model's own FP16:
 
-\subsection{Sparse MoE Scratch Benchmark}
-
-Extending the matched-control formulation to Top-2 Sparse MoE architectures yields the results in Table~\ref{tab:moe_scratch}. Under native ternary QAT on expert weights, dLLM pays zero additional tax ($+0.68\%$ degradation vs.\ $-0.50\%$ in AR, $R \le 1.25$ satisfied). 
-
-Crucially, in end-to-end generation, AR rollout suffers $20.31\%$ trajectory corruption, whereas dLLM canvas refinement limits corruption to $12.50\%$ ($-7.81$\,pp excess, $R = 0.615$). Here, the strict \texttt{dllm\_more\_robust} criterion ($R < 0.80$) fires.
-
-\begin{table}[h]
-\centering
-\small
-\caption{Matched Top-2 Sparse MoE benchmark trained on text corpus.}
-\label{tab:moe_scratch}
-\vspace{2mm}
-\begin{tabular}{lrrrr}
-\toprule
-Metric & AR-MoE & dLLM-MoE & Excess (dLLM $-$ AR) & Gap Ratio $R$ \\
-\midrule
-INT4 Validation Loss Degr. & $+0.34\%$ & $-2.43\%$ & $-2.76$\,pp & Robust \\
-Ternary-QAT Loss Degr. & $-0.50\%$ & $+0.68\%$ & $+1.18$\,pp & $1.000$ \\
-Router Flip Rate (INT4) & $4.62\%$ & $4.98\%$ & $+0.36$\,pp & $1.077$ \\
-Trajectory Drift & $20.31\%$ & $12.50\%$ & $\mathbf{-7.81}$\,\textbf{pp} & $\mathbf{0.615}$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Production MoE Checkpoint: 64-Prompt Statistical Grid}
-
-To test transfer to production architectures, we evaluated \texttt{PrimeIntellect/qwen3-moe-tiny} (24 layers, 16 experts per layer, Top-4 routing) across a 64-prompt statistical grid ($N = 64, df = 63$) spanning 8 distinct domains.
-
-\begin{table}[h]
-\centering
-\small
-\caption{64-sample statistical rigor grid on native \texttt{qwen3-moe-tiny}.}
-\label{tab:grid_64}
-\vspace{2mm}
+\begin{center}
 \begin{tabular}{lrrr}
 \toprule
-Precision Regime & AR Drift (95\% CI) & Block-Diffusion Drift (95\% CI) & Excess Gap \\
+precision & AR degradation & dLLM degradation & excess (dLLM $-$ AR) \\
 \midrule
-INT4 Experts & $24.85\% \pm 7.03\%$ & $21.58\% \pm 4.75\%$ & $-3.27$\,pp \\
-Ternary (1.58b) Experts & $46.09\% \pm 8.51\%$ & $41.55\% \pm 6.40\%$ & $\mathbf{-4.54 \pm 8.65}$\,\textbf{pp} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-As shown in Table~\ref{tab:grid_64}, diffusion canvas unmasking demonstrates superior trajectory stability across both precision regimes:
-\begin{enumerate}
-\item \textbf{Consistent Excess Advantage:} Under ternary experts, block-diffusion achieves a mean excess reduction of $-4.54$\,pp.
-\item \textbf{Variance Suppression:} The $95\%$ confidence interval for block-diffusion ($\pm 6.40\%$) is markedly tighter than AR ($\pm 8.51\%$), confirming that canvas unmasking prevents the extreme runaway divergence modes characteristic of causal rollout.
-\item \textbf{Stress Regimes:} In high-divergence test prompts, AR rollout experienced up to $75.00\%$ complete trajectory collapse, whereas block-diffusion constrained divergence to $15.62\%$ (a $-59.38$\,pp excess advantage).
-\end{enumerate}
-
-\subsection{Hardware Memory Physics: Breaking the $B=1$ Bottleneck}
-
-Table~\ref{tab:hardware_profile} presents hardware profiling across precision regimes. Autoregressive decoding at batch size $B=1$ streams $1{,}716$\,MB of active parameters across the bus to generate 64 tokens in FP32 ($\text{Arithmetic Intensity} = 0.50$\,FLOPs/Byte). 
-
-\begin{table}[h]
-\centering
-\small
-\caption{Hardware profiling for 64 generated tokens on Top-2 MoE backbone.}
-\label{tab:hardware_profile}
-\vspace{2mm}
-\begin{tabular}{llrrr}
-\toprule
-Precision & Decoding Paradigm & Forward Passes & DRAM Streamed & Arithmetic Intensity \\
-\midrule
-FP32 & Autoregressive & 64 & $1716.1$\,MB & $0.50$\,FLOPs/B \\
-FP32 & Block-Diffusion ($B=32$) & 12 & $321.8$\,MB & $2.67$\,FLOPs/B \\
-\midrule
-INT4 & Autoregressive & 64 & $214.5$\,MB & $4.00$\,FLOPs/B \\
-INT4 & Block-Diffusion ($B=32$) & 12 & $40.2$\,MB & $21.33$\,FLOPs/B \\
-\midrule
-Ternary (1.58b) & Autoregressive & 64 & $85.8$\,MB & $10.00$\,FLOPs/B \\
-Ternary (1.58b) & Block-Diffusion ($B=32$) & 12 & $\mathbf{16.1}$\,\textbf{MB} & $\mathbf{53.33}$\,\textbf{FLOPs/B} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-By combining ternary expert compression with Semi-AR Block Diffusion ($B=32, S=6$), active weight streaming drops to \textbf{16.1\,MB} per 64 tokens. This represents a \textbf{106.7$\times$ total data movement reduction} over FP32 AR, elevating arithmetic intensity to \textbf{53.33\,FLOPs/Byte} and yielding a \textbf{4.34$\times$ real wall-clock throughput speedup} on local CPU hardware.
-
-\subsection{The RoPE Inversion Failure and Causal-Consistent Resolution}
-\label{sec:rope}
-
-When converting pre-trained causal models to diffusion, zero-shot bidirectional mask dropping fails catastrophically:
-\begin{center}
-\small
-\begin{tabular}{p{0.22\linewidth}p{0.70\linewidth}}
-\toprule
-Decoding Method & Generation Output on \texttt{Qwen2.5-0.5B} \\
-\midrule
-Pre-trained AR & \emph{``The theory of general relativity explains that gravity is caused by the curvature of spacetime caused by the presence of mass...''} \\
-Naive Bidirectional & \emph{``The theory of general relativity explains that gravity is  00 [CJK]  1 [CJK] |Human\# \#0Human0$<$$\backslash$  [CJK] ''} \\
-Causal-Consistent Block & \emph{``The theory of general relativity explains that gravity is caused by the curvature of spacetime caused by the presence of mass...''} \\
+INT8 & $\sim$0\% & $+0.3$--$0.6\%$ & $\le +0.7$pp \\
+INT4 & $+25$--$32\%$ & $+9$--$21\%$ & $\mathbf{-11}$ \textbf{to} $\mathbf{-16}$\textbf{pp} \\
+ternary & $\sim$$10^4\times$ FP16 & $\sim$$10^{12}\times$ FP16 & uninformative (pre-reg.) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-We identify the mechanism: Rotary Position Embeddings (RoPE) under bidirectional attention evaluate negative relative offsets ($i - j < 0$), an out-of-distribution regime that disperses attention entropy. By employing \textbf{Causal-Consistent Block Attention} with confidence thresholding ($\tau = 0.85$), relative positions remain non-negative ($i - j \ge 0$), achieving \textbf{100\% exact word-for-word generation fidelity} with the AR baseline zero-shot.
+At INT4 the dLLM absorbs weight-quantization noise roughly 2$\times$ better than its AR twin, unanimous across PTB / Wikitext103 / LAMBADA. The pre-registered \texttt{dllm\_more\_robust} verdict fired. 
 
-\subsection{Interactive Exploration via Reactive Notebooks}
-To enable transparent inspection of token-level generation trajectories, attention entropy, and expert gate activation patterns, we release an interactive reactive notebook built using the open-source Marimo framework (\texttt{marimo\_moe\_diffusion.py}). Researchers can interactively toggle precision regimes (FP32, INT4, BitNet b1.58 Ternary), vary confidence thresholds $\tau$, and observe the real-time suppression of autoregressive compounding collapse on live MoE checkpoints.
+\paragraph{Ternary PTQ asymmetry.} Under naive round-to-nearest ternary PTQ, both architectures collapse into numerical degeneracy, though the dLLM degrades $\sim 8$ orders of magnitude deeper ($\sim 10^{14}\times$ FP16 perplexity vs.\ $\sim 10^6\times$ for AR). As declared in our pre-registration (\texttt{configs/exp0.yaml}), uncalibrated ternary PTQ was anticipated as uninformative for both models, directly motivating native ternary QAT (\S\ref{sec:qat}).
 
-\section{Roadmap: Toward Sub-2-Bit Production MoEs}
+\paragraph{Absolute perplexity vs.\ relative sensitivity.} While our primary metric is relative sensitivity to weight noise (excess degradation), we report the underlying absolute perplexities in Table~\ref{tab:absolute_ptq} to contextualize baseline headroom.
 
-The empirical validation presented here outlines an actionable engineering pathway for frontier architectures:
-\begin{enumerate}
-\item \textbf{Causal-Consistent Block Diffusion Backbone:} Decouple past historical context (standard causal KV cache) from candidate blocks, executing parallel unmasking without RoPE distortion.
-\item \textbf{Second-Order Expert Quantization (Bonsai / DeltaNet):} Compress expert feed-forward layers down to ternary $\{-1, 0, +1\}$ or 2-bit representations. Because the block-diffusion denoiser absorbs router jitter, experts can be ternarized without triggering the compounding collapse of causal decoders.
-\item \textbf{Target Scaling (Qwen-Flash-Next / Gemma MoE):} Applying this recipe to a 100B+ class MoE compresses active expert parameters into $<25$\,GB of memory, enabling interactive inference on commodity RAM or single-GPU workstations.
-\end{enumerate}
+\begin{table}[h]
+\centering
+\small
+\caption{Absolute validation perplexities and generative oracle scores at 130M.}
+\label{tab:absolute_ptq}
+\vspace{2mm}
+\begin{tabular}{lrrrrr}
+\toprule
+Evaluation Metric & FP16 AR & FP16 dLLM & INT4 AR & INT4 dLLM & Lower at INT4 \\
+\midrule
+Penn Treebank (ppl) & 80.75 & 82.40 & 106.43 & 99.58 & dLLM \\
+Wikitext-103 (ppl) & 25.61 & 30.67 & 32.49 & 34.23 & AR \\
+LAMBADA (ppl) & 52.99 & 49.12 & 66.12 & 53.55 & dLLM \\
+Generative Anchor (oracle ppl) & 14.64 & 33.87 & 28.72 & 49.25 & AR \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Crucially, while the dLLM is more robust to INT4 weight noise across all benchmarks, it is \emph{not} the superior model in absolute terms on Wikitext-103 or the generative anchor. In fact, on the generative anchor, INT4 AR (28.72) outperforms even unquantized FP16 dLLM (33.87). This explicitly confirms that our result establishes \emph{relative quantization sensitivity}, not absolute generative superiority at 130M scale.
+
+\subsection{Generative anchor (corroboration)}
+\label{sec:anchor}
+
+64 samples/condition, GPT-2-large oracle, degeneracy guard passed wherever sampling succeeded.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+precision & AR gen-ppl $\Delta$ & dLLM gen-ppl $\Delta$ & excess \\
+\midrule
+INT4 & $+96.2\%$ & $+45.4\%$ & $\mathbf{-50.8}$\textbf{pp} \\
+ternary & guard trips & guard trips & uninformative \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The dLLM's \emph{generated text} degrades $\sim$2$\times$ less than the AR model's at INT4 ($n=64$ samples, seed 1, sequence length 512). The likelihood result is not a perplexity artifact. We note an unexplained nuance at INT8: the dLLM anchor perplexity increases $+10.5\%$ against a validation likelihood increase of only $+0.6\%$, whereas AR anchor perplexity remains completely flat ($+0.0\%$).
+
+\subsection{Native ternary QAT at 7M (supporting)}
+\label{sec:qat}
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+seed & AR tax & dLLM tax & gap ratio $R$ \\
+\midrule
+1 & $+18.41\%$ & $+5.19\%$ & 0.888 \\
+2 & $+30.71\%$ & $+15.43\%$ & 0.883 \\
+3 & $+16.12\%$ & $+4.23\%$ & 0.898 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Evaluation across two metric scales.} On the pre-registered metric scale (ratio of perplexity ratios), the geometric-mean gap ratio is $R = 0.890$, 95\% $t$ CI $[0.872, 0.908]$ ($df=2$). The pre-registered no-extra-tax criterion fires (upper CI $\le 1.25$), while the stricter \texttt{dllm\_better} criterion (upper CI $< 0.80$) does not.
+
+To avoid metric compression near 1.0, we also recompute the result on the natural cross-entropy scale ($\Delta\text{nats}$):
+\begin{center}
+\small
+\begin{tabular}{rrrrr}
+\toprule
+Seed & AR $\Delta\text{nats}$ & dLLM $\Delta\text{nats}$ & Ratio ($\Delta\text{dLLM} / \Delta\text{AR}$) \\
+\midrule
+1 & $0.1690$ & $0.0506$ & $0.299$ \\
+2 & $0.2677$ & $0.1434$ & $0.536$ \\
+3 & $0.1494$ & $0.0414$ & $0.277$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+On the natural cross-entropy scale, the geometric mean ratio is \textbf{0.354} with 95\% $t$-interval $[0.145, 0.867]$. This reveals two crucial insights: (1) the underlying ternary error damping is substantially larger than $R=0.890$ suggests (the dLLM incurs roughly one-third the cross-entropy degradation of AR); but (2) with three seeds, the confidence interval is $20\times$ wider, demonstrating that three seeds establish the direction but do not tightly pin down the magnitude.
+
+\subsection{Mechanism probes (honest negatives)}
+\label{sec:mechanism}
+
+The tempting explanation is that argmax commitment absorbs errors: a sub-margin logit perturbation leaves the committed token unchanged. We tested whether that produces \emph{end-to-end} absorption.
+
+\begin{itemize}
+\item \textbf{Commit-and-freeze, 96 trajectories.} Changing eight fixed tokens propagated to \textbf{65.7\% (FP16) vs 66.3\% (ternary)} of downstream positions. Three-seed ternary-minus-FP16 interval $[-2.2, +3.3]$pp---no resolved precision effect. A wrong frozen token remains conditioning context; perturbations grow, not shrink.
+\item \textbf{Post-hoc revisable retrofit.} $\sim$98\% disagreement---revision applied to a model not trained for it is not corrective.
+\end{itemize}
+
+Both reject ``commitment automatically erases fixed-token errors.'' The robustness in \S\ref{sec:ptq}--\ref{sec:qat} is real but is \emph{not} explained by this mechanism.
+
+\section{Reproducibility}
+
+Single RTX 2080 Super (8GB, sm75, no FlashAttention-2). All configs, checkpoint SHA-256 hashes, pre-registration tags, and the flash-attention$\to$SDPA numerical-equivalence shim are released. Full bring-up log and dependency pins accompany the code; raw perplexities and hashes are in the replication results.
+
+\section{Limitations}
+\label{sec:limitations}
+
+\begin{itemize}
+\item \textbf{Scale.} Smallest matched PTQ pair is 130M; QAT pair is $\sim$7M. Nothing here transfers to 1B$+$ without evidence.
+\item \textbf{The QAT rung is confounded three ways.} At 7M, ternary is below BitNet's $\sim$3B competitiveness threshold, only 21.5\% of dLLM params (19.6\% of AR params) are ternarized, and the dLLM objective is a NELBO bound rather than exact likelihood. The 130M INT4 PTQ result carries none of these; treat it as the spine and QAT as the riskier supporting evidence.
+\item \textbf{No absolute-quality parity claim.} dLLMs lose to AR on absolute quality at these scales regardless of quantization. This paper is about \emph{relative sensitivity to quantization}, not usefulness.
+\item \textbf{PTQ method.} Naive round-to-nearest throughout, by design---the matched control, not calibration engineering, carries the claim.
+\item \textbf{No mechanism.} \S\ref{sec:mechanism} rejects the obvious one and offers no replacement.
+\item \textbf{No deployment claim.} Only 21.5\% of dLLM params (19.6\% in AR) are ternarized; weight-only idealized reduction is $\sim$1.23$\times$. No packed-ternary kernel, latency, or VRAM claim is made.
+\end{itemize}
 
 \section{Conclusion}
 
-At matched scale, data, tokenizer, and training recipe, discrete masked diffusion language models absorb extreme weight quantization and routing gate noise significantly better than autoregressive decoders. On dense models, dLLMs exhibit a $2\times$ degradation advantage at INT4 and zero extra ternary tax. On Sparse MoEs, diffusion canvas refinement suppresses cascading router flips, reducing ternary trajectory drift by up to $-59.38$\,pp. Combined with a $106.7\times$ reduction in DRAM traffic and causal-consistent block decoding, discrete diffusion provides the missing architectural foundation for deploying extreme sub-2-bit MoEs on bandwidth-constrained hardware.
+At matched scale, data, tokenizer, and recipe, masked diffusion language models absorb extreme weight quantization better than autoregressive models---clearly so at INT4 (130M, $\sim$2$\times$, three datasets, corroborated generatively), and with no extra ternary tax under native QAT (7M, three seeds). The effect is robust and replicated. The intuitive mechanism---token commitment as an error-absorbing quantizer---does not survive testing. We publish the effect, the negative mechanism result, and a full reproducibility release, and leave scale transfer and deployment to future work.
 
-{\small\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
-\begin{thebibliography}{99}
+\begin{thebibliography}{10}
 \bibitem{gptq} E. Frantar, S. Ashkboos, T. Hoefler, D. Alistarh. \emph{GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers}. ICLR (2023).
-\bibitem{bitnet} S. Ma et al. \emph{The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits} (BitNet b1.58). arXiv:2402.17764 (2024).
-\bibitem{ptb} M. P. Marcus, M. A. Marcinkiewicz, B. Santorini. \emph{Building a large annotated corpus of English: The Penn Treebank}. Computational Linguistics, 19(2):313--330 (1993).
-\bibitem{mdlm} S. Sahoo et al. \emph{Simple and Effective Masked Diffusion Language Models} (MDLM). arXiv:2406.07524 (2024).
-\bibitem{llada} \emph{Large Language Diffusion Models} (LLaDA). arXiv:2502.09992 (2025).
-\bibitem{dllmquant} C. Xu et al. \emph{DLLMQuant: Quantizing Diffusion-based Large Language Models}. arXiv:2508.14090 (2025).
-\bibitem{quantdllm} Y. Zhang et al. \emph{Quant-dLLM: Ultra-Low-Bit Post-Training Quantization for Diffusion Language Models}. ICLR (2025).
-\bibitem{moequant} X. Chen et al. \emph{MoEQuant: Expert-Balanced Quantization for Mixture-of-Experts}. ICML (2025).
-\bibitem{eaquant} H. Wang et al. \emph{EAQuant: Expert-Aware Quantization for Extreme Low-Bit MoEs}. arXiv:2501.08921 (2025).
-\bibitem{diffullama} Z. Liu et al. \emph{DiffuLLaMA: Adapting Pre-trained Causal LLMs to Discrete Diffusion}. ICLR (2025).
-\bibitem{fluid} K. Park et al. \emph{FLUID: Causal-Consistent Alignment for Autoregressive-to-Diffusion Adaptation}. ACL (2025).
-\bibitem{efficientdlm} L. Zhao et al. \emph{Efficient-DLM: Block-Wise Parallel Decoding with Causal Preservation}. arXiv:2504.09812 (2025).
-\bibitem{remdm} G. Wang, Y. Schiff, S. Sahoo, V. Kuleshov. \emph{Remasking Discrete Diffusion Models with Inference-Time Scaling} (ReMDM). arXiv:2503.00307 (2025).
-\bibitem{ptq4dm} Y. Shang et al. \emph{Post-training Quantization on Diffusion Models} (PTQ4DM). arXiv:2211.15736 (2022).
-\bibitem{qdiffusion} X. Li et al. \emph{Q-Diffusion: Quantizing Diffusion Models}. arXiv:2302.04304 (2023).
-\bibitem{tdq} J. So et al. \emph{Temporal Dynamic Quantization for Diffusion Models} (TDQ). arXiv:2306.02316 (2023).
+\bibitem{bitnet} S. Ma et al. \emph{The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits} (BitNet b1.58). arXiv:2402.17764.
+\bibitem{mdlm} S. Sahoo et al. \emph{Simple and Effective Masked Diffusion Language Models} (MDLM). arXiv:2406.07524.
+\bibitem{llada} \emph{Large Language Diffusion Models} (LLaDA). arXiv:2502.09992.
+\bibitem{dllmquant} C. Xu et al. \emph{DLLMQuant: Quantizing Diffusion-based Large Language Models}. arXiv:2508.14090.
+\bibitem{quantdllm} T. Zhang, Y. Shen, Y. Zhang, Y. Ding, G. Hua. \emph{Quant-dLLM: Ultra-Low-Bit Post-Training Quantization for Diffusion Language Models}. ICLR (2026). arXiv:2510.03274.
+\bibitem{remdm} G. Wang, Y. Schiff, S. Sahoo, V. Kuleshov. \emph{Remasking Discrete Diffusion Models with Inference-Time Scaling} (ReMDM). arXiv:2503.00307.
+\bibitem{ptq4dm} Y. Shang et al. \emph{Post-training Quantization on Diffusion Models} (PTQ4DM). arXiv:2211.15736.
+\bibitem{qdiffusion} X. Li et al. \emph{Q-Diffusion: Quantizing Diffusion Models}. arXiv:2302.04304.
+\bibitem{tdq} J. So et al. \emph{Temporal Dynamic Quantization for Diffusion Models} (TDQ). arXiv:2306.02316.
 \end{thebibliography}
-}
 
 \end{document}
