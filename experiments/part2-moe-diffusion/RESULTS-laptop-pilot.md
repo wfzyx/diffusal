@@ -60,3 +60,51 @@ EMPIRICAL WALL-CLOCK LATENCY (LAPTOP CPU):
   • DRAM Traffic Reduction:             5.33x less memory streaming
   • Combined DRAM Reduction (FP32 AR vs Ternary Block-dLLM): 106.7x less data moved!
 ```
+
+
+---
+
+## 3. Real-World Checkpoint Experiment 1: Sparse Upcycling on Qwen2.5-0.5B (Problem 1 Validation)
+
+Testing causal-to-diffusion block sampling on real pre-trained weights (`Qwen/Qwen2.5-0.5B` upcycled to 4 experts, Top-2):
+
+```
+Prompt: "The theory of general relativity explains that gravity is"
+
+• Pre-trained AR Baseline (Causal, 32 passes):
+  "The theory of general relativity explains that gravity is caused by the curvature of spacetime caused by the presence of mass. The curvature of spacetime is caused by the presence of mass and energy. The curvature of"
+
+• Unadapted Block-Diffusion (Bidirectional Canvas Block, 12 passes):
+  "The theory of general relativity explains that gravity is  00 人  1 的 |Human# #0Human0<\  的 "
+
+• INT4 Block-Diffusion:
+  "The theory of general relativity explains that gravity isT1 1A3附 2AGGA人quest6 21 @ B【"
+
+• Ternary (BitNet b1.58) Block-Diffusion:
+  "The theory of general relativity explains that gravity ismodifiedbynamebyname以及适modifiedmodified..."
+```
+
+### Problem 1 Finding:
+Empirically confirms that **unadapted bidirectional canvas sampling on pre-trained causal models produces immediate semantic disintegration**.
+RoPE relative position offsets $(i - j < 0)$ and causal query-key subspace alignments require a lightweight adapter or block-diffusion fine-tuning before canvas unmasking can preserve English coherence.
+
+---
+
+## 4. Real-World Checkpoint Experiment 2: Native MoE Routing on PrimeIntellect/qwen3-moe-tiny (Problem 2 Validation)
+
+Target: `PrimeIntellect/qwen3-moe-tiny` (24 Layers, 16 Experts per layer, Top-4 active routing).
+
+```
+================================================================================
+               NATIVE PRODUCTION MOE QUANTIZATION BENCHMARK
+================================================================================
+Metric                    | INT4 Experts       | Ternary (1.58b) Experts
+--------------------------------------------------------------------------------
+Top-4 Router Flip Rate    |   3.86%            |  20.29%
+AR Rollout Drift (32 tok) |  65.62%            |  68.75%
+================================================================================
+```
+
+### Problem 2 Finding:
+Empirically confirms Theorem 1 on production MoE architectures:
+Even with a low **3.86%** Top-4 router flip rate on prompt tokens under INT4, sequential autoregressive rollout experiences compounding state drift, blowing up to **65.62% trajectory drift** within only 32 generated tokens!
