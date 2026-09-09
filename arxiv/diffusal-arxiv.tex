@@ -14,7 +14,7 @@
 \setlist{itemsep=2pt, topsep=4pt}
 
 \title{\textbf{Masked Diffusion Language Models Absorb Extreme Weight\\
-Quantization Better Than Autoregressive Models at Matched Scale}}
+Quantization Better Than Autoregressive Models at Matched Scale}\thanks{Code, model configs, checkpoint SHA-256 hashes, and pre-registration tags available at \url{https://github.com/wfzyx/diffusal}.}}
 \author{Victor Hugo Panisa Bezerra\\\texttt{victor.panisa@gmail.com}}
 \date{July 2026}
 
@@ -41,7 +41,7 @@ This paper isolates one comparison and answers it cleanly: \emph{at matched scal
 
 \section{Related Work}
 
-\paragraph{Quantization of diffusion.} Timestep-aware quantization for \emph{continuous image} diffusion (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}) established that quantization error accumulates non-uniformly across denoising steps and that step-dependent precision is the mitigation. We do not re-derive this. Our setting is discrete \emph{text} diffusion, where the per-step operation includes an argmax commitment with no continuous analogue. DLLMQuant~\cite{dllmquant} studies PTQ for diffusion LLMs specifically; we differ by insisting on a matched AR control, so the reported quantity is diffusion-specific excess, not dLLM degradation in isolation.
+\paragraph{Quantization of diffusion and second-order methods.} Timestep-aware quantization for \emph{continuous image} diffusion (PTQ4DM~\cite{ptq4dm}, Q-Diffusion~\cite{qdiffusion}, TDQ~\cite{tdq}) established that quantization error accumulates non-uniformly across denoising steps. In autoregressive Transformers, post-training quantization was revolutionized by second-order inverse Hessian methods such as GPTQ~\cite{gptq}. Our setting is discrete \emph{text} diffusion, where each step involves an argmax commitment with no continuous analogue. DLLMQuant~\cite{dllmquant} and Quant-dLLM~\cite{quantdllm} study PTQ for discrete diffusion LLMs; we differ by strictly evaluating against matched autoregressive controls to isolate diffusion-specific excess rather than isolated model degradation.
 
 \paragraph{Low-bit LLMs.} BitNet b1.58~\cite{bitnet} argues native ternary training is competitive from $\sim$3B parameters upward; below that, ternary underperforms FP16 \emph{for reasons unrelated to diffusion}. This is exactly why our QAT result reports a gap-of-gaps, not an absolute number.
 
@@ -82,7 +82,31 @@ ternary & $\sim$$10^4\times$ FP16 & $\sim$$10^{12}\times$ FP16 & uninformative (
 \end{tabular}
 \end{center}
 
-At INT4 the dLLM absorbs weight-quantization noise roughly 2$\times$ better than its AR twin, unanimous across PTB / Wikitext103 / LAMBADA. The pre-registered \texttt{dllm\_more\_robust} verdict fired. Ternary PTQ collapses on both, exactly as BitNet's premise predicts---pre-registered as uninformative.
+At INT4 the dLLM absorbs weight-quantization noise roughly 2$\times$ better than its AR twin, unanimous across PTB / Wikitext103 / LAMBADA. The pre-registered \texttt{dllm\_more\_robust} verdict fired. 
+
+\paragraph{Ternary PTQ asymmetry.} Under naive round-to-nearest ternary PTQ, both architectures collapse into numerical degeneracy, though the dLLM degrades $\sim 8$ orders of magnitude deeper ($\sim 10^{14}\times$ FP16 perplexity vs.\ $\sim 10^6\times$ for AR). As declared in our pre-registration (\texttt{configs/exp0.yaml}), uncalibrated ternary PTQ was anticipated as uninformative for both models, directly motivating native ternary QAT (\S\ref{sec:qat}).
+
+\paragraph{Absolute perplexity vs.\ relative sensitivity.} While our primary metric is relative sensitivity to weight noise (excess degradation), we report the underlying absolute perplexities in Table~\ref{tab:absolute_ptq} to contextualize baseline headroom.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Absolute validation perplexities and generative oracle scores at 130M.}
+\label{tab:absolute_ptq}
+\vspace{2mm}
+\begin{tabular}{lrrrrr}
+\toprule
+Evaluation Metric & FP16 AR & FP16 dLLM & INT4 AR & INT4 dLLM & Lower at INT4 \\
+\midrule
+Penn Treebank (ppl) & 80.75 & 82.40 & 106.43 & 99.58 & dLLM \\
+Wikitext-103 (ppl) & 25.61 & 30.67 & 32.49 & 34.23 & AR \\
+LAMBADA (ppl) & 52.99 & 49.12 & 66.12 & 53.55 & dLLM \\
+Generative Anchor (oracle ppl) & 14.64 & 33.87 & 28.72 & 49.25 & AR \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Crucially, while the dLLM is more robust to INT4 weight noise across all benchmarks, it is \emph{not} the superior model in absolute terms on Wikitext-103 or the generative anchor. In fact, on the generative anchor, INT4 AR (28.72) outperforms even unquantized FP16 dLLM (33.87). This explicitly confirms that our result establishes \emph{relative quantization sensitivity}, not absolute generative superiority at 130M scale.
 
 \subsection{Generative anchor (corroboration)}
 \label{sec:anchor}
@@ -100,7 +124,7 @@ ternary & guard trips & guard trips & uninformative \\
 \end{tabular}
 \end{center}
 
-The dLLM's \emph{generated text} degrades $\sim$2$\times$ less than the AR model's at INT4. The likelihood result is not a perplexity artifact.
+The dLLM's \emph{generated text} degrades $\sim$2$\times$ less than the AR model's at INT4 ($n=64$ samples, seed 1, sequence length 512). The likelihood result is not a perplexity artifact. We note an unexplained nuance at INT8: the dLLM anchor perplexity increases $+10.5\%$ against a validation likelihood increase of only $+0.6\%$, whereas AR anchor perplexity remains completely flat ($+0.0\%$).
 
 \subsection{Native ternary QAT at 7M (supporting)}
 \label{sec:qat}
@@ -117,7 +141,22 @@ seed & AR tax & dLLM tax & gap ratio $R$ \\
 \end{tabular}
 \end{center}
 
-Geometric-mean $R = 0.890$, 95\% $t$ CI $[0.872, 0.908]$. The pre-registered no-extra-tax criterion fires (upper CI $\le 1.25$). The stricter \texttt{dllm\_better} criterion (upper CI $< 0.80$) does \emph{not}. Reading: diffusion pays no extra ternary tax at this scale, but this is not evidence of \emph{superior} tolerance---and see \S\ref{sec:limitations} for the confounds specific to this rung.
+\paragraph{Evaluation across two metric scales.} On the pre-registered metric scale (ratio of perplexity ratios), the geometric-mean gap ratio is $R = 0.890$, 95\% $t$ CI $[0.872, 0.908]$ ($df=2$). The pre-registered no-extra-tax criterion fires (upper CI $\le 1.25$), while the stricter \texttt{dllm\_better} criterion (upper CI $< 0.80$) does not.
+
+To avoid metric compression near 1.0, we also recompute the result on the natural cross-entropy scale ($\Delta\text{nats}$):
+\begin{center}
+\small
+\begin{tabular}{rrrrr}
+\toprule
+Seed & AR $\Delta\text{nats}$ & dLLM $\Delta\text{nats}$ & Ratio ($\Delta\text{dLLM} / \Delta\text{AR}$) \\
+\midrule
+1 & $0.1690$ & $0.0506$ & $0.299$ \\
+2 & $0.2677$ & $0.1434$ & $0.536$ \\
+3 & $0.1494$ & $0.0414$ & $0.277$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+On the natural cross-entropy scale, the geometric mean ratio is \textbf{0.354} with 95\% $t$-interval $[0.145, 0.867]$. This reveals two crucial insights: (1) the underlying ternary error damping is substantially larger than $R=0.890$ suggests (the dLLM incurs roughly one-third the cross-entropy degradation of AR); but (2) with three seeds, the confidence interval is $20\times$ wider, demonstrating that three seeds establish the direction but do not tightly pin down the magnitude.
 
 \subsection{Mechanism probes (honest negatives)}
 \label{sec:mechanism}
@@ -151,11 +190,13 @@ Single RTX 2080 Super (8GB, sm75, no FlashAttention-2). All configs, checkpoint 
 
 At matched scale, data, tokenizer, and recipe, masked diffusion language models absorb extreme weight quantization better than autoregressive models---clearly so at INT4 (130M, $\sim$2$\times$, three datasets, corroborated generatively), and with no extra ternary tax under native QAT (7M, three seeds). The effect is robust and replicated. The intuitive mechanism---token commitment as an error-absorbing quantizer---does not survive testing. We publish the effect, the negative mechanism result, and a full reproducibility release, and leave scale transfer and deployment to future work.
 
-\begin{thebibliography}{9}
+\begin{thebibliography}{10}
+\bibitem{gptq} E. Frantar, S. Ashkboos, T. Hoefler, D. Alistarh. \emph{GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers}. ICLR (2023).
 \bibitem{bitnet} S. Ma et al. \emph{The Era of 1-bit LLMs: All Large Language Models are in 1.58 Bits} (BitNet b1.58). arXiv:2402.17764.
 \bibitem{mdlm} S. Sahoo et al. \emph{Simple and Effective Masked Diffusion Language Models} (MDLM). arXiv:2406.07524.
 \bibitem{llada} \emph{Large Language Diffusion Models} (LLaDA). arXiv:2502.09992.
 \bibitem{dllmquant} C. Xu et al. \emph{DLLMQuant: Quantizing Diffusion-based Large Language Models}. arXiv:2508.14090.
+\bibitem{quantdllm} T. Zhang, Y. Shen, Y. Zhang, Y. Ding, G. Hua. \emph{Quant-dLLM: Ultra-Low-Bit Post-Training Quantization for Diffusion Language Models}. ICLR (2026). arXiv:2510.03274.
 \bibitem{remdm} G. Wang, Y. Schiff, S. Sahoo, V. Kuleshov. \emph{Remasking Discrete Diffusion Models with Inference-Time Scaling} (ReMDM). arXiv:2503.00307.
 \bibitem{ptq4dm} Y. Shang et al. \emph{Post-training Quantization on Diffusion Models} (PTQ4DM). arXiv:2211.15736.
 \bibitem{qdiffusion} X. Li et al. \emph{Q-Diffusion: Quantizing Diffusion Models}. arXiv:2302.04304.
