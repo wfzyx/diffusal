@@ -1,0 +1,1 @@
+Terminated                 .venv/bin/python train.py "$@" $c --out runs/$name.json > runs/$name.log 2>&1
